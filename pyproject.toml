@@ -1,0 +1,10 @@
+[project]
+name = "openenv-ssv"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "huggingface-hub>=1.8.0",
+    "openenv-core>=0.2.3",
+]
