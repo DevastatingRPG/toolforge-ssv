@@ -23,6 +23,11 @@ For every run, the agent must carefully adhere to these rules and conventions:
    - Do not modify files or boilerplate outside the scope of the user's explicit instructions.
    - Provide type hints for Python function signatures, and follow standard styling (e.g., PEP 8).
    - Variables, classes, and functions should have descriptive and meaningful names.
+   - **Logging**: Code must include proper logging (e.g., `import logging`).
+   - **Commenting Requirements**: Code must be heavily commented.
+     - **Classes**: Each class must have a comment/docstring describing what the class is for.
+     - **Methods**: Each method should have "butterfly comments" (decorative/prominent block comments) clearly outlining its purpose.
+     - **Variables**: Each variable, whether global or a class variable, must have an accompanying comment explaining what it's used for.
    - Any future coding conventions provided by the user must be appended to this list.
 
 ---
