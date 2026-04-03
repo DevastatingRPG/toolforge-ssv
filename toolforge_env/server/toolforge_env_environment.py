@@ -125,18 +125,17 @@ class ToolforgeEnvironment(Environment):
         """
         self._state.step_count += 1
 
-        message = action.message
-        length = len(message)
+        
 
         # Simple reward: longer messages get higher rewards
-        reward = length * 0.1
+        reward = 1
 
         return ToolforgeObservation(
-            echoed_message=message,
-            message_length=length,
+            current_task=self._state.current_task,
+            available_tools=self._state.available_tools,
             done=False,
             reward=reward,
-            metadata={"original_message": message, "step": self._state.step_count},
+            metadata={"step": self._state.step_count},
         )
 
     @property
