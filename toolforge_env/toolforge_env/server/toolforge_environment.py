@@ -19,12 +19,13 @@ Current implementation status:
 
 import logging
 import uuid
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from openenv.core.env_server.interfaces import Environment
 from openenv.core.env_server.types import EnvironmentMetadata
 
 from toolforge_env.models import (
+    Tool,
     ToolForgeAction,
     ToolForgeObservation,
     ToolForgeState,
@@ -203,13 +204,15 @@ class ToolForgeEnvironment(Environment):
         Performs deterministic accounting (step_count, call_history,
         tokens_used), gates plans through simulated user approval, runs
         the judge pipeline only for approved plans, and returns an
-        observation. Macro acceptance is not yet implemented.
+        observation.
 
-                Phase-2 progression and gating rules:
-                        - Plans rejected by the simulated user do not run through the
-                            judge pipeline and must retry the same task.
-                        - For user-approved plans, structural validation controls
-                            advancement to the next queued task.
+        Phase-2 and Phase-3 rules:
+            - Plans rejected by the simulated user do not run through the
+              judge pipeline and must retry the same task.
+            - For user-approved plans, structural validation controls
+              advancement to the next queued task.
+            - Macro proposals are accepted/rejected deterministically and
+              approved macros are registered as reusable tools.
 
         Args:
             action:    The agent's proposed plan (ToolForgeAction).
@@ -259,6 +262,12 @@ class ToolForgeEnvironment(Environment):
                 self._state.done = True
                 progression = "episode_terminated_max_steps"
 
+            macro_result = self._process_macro_proposal(
+                action=action,
+                can_accept=False,
+                reject_reason="plan_rejected_by_user",
+            )
+
             obs_rejected: ToolForgeObservation = self._get_observation()
             obs_rejected.reward = 0.0
             obs_rejected.done = self._is_done()
@@ -268,6 +277,11 @@ class ToolForgeEnvironment(Environment):
                 "passed_validation": None,
                 "user_approved": False,
                 "progression": progression,
+                "macro_attempted": macro_result["attempted"],
+                "macro_decision": macro_result["decision"],
+                "macro_name": macro_result["name"],
+                "macro_reason": macro_result["reason"],
+                "accepted_macro_count": len(self._state.accepted_macros),
             }
 
             logger.debug(
@@ -279,7 +293,7 @@ class ToolForgeEnvironment(Environment):
             )
             return obs_rejected
 
-        # 5. Run the judge pipeline (validator → slot judge → reward → token cost)
+        # 5. Run the judge pipeline (validator -> slot judge -> reward -> token cost)
         available_tools_by_name = {
             tool.name: tool for tool in self._state.available_tools
         }
@@ -300,10 +314,17 @@ class ToolForgeEnvironment(Environment):
             advanced = self._advance_to_next_task()
             progression = "advanced_to_next_task" if advanced else "episode_completed"
 
-        # 7. Build observation from updated state
+        # 7. Process macro proposal lifecycle after plan-level outcome is known.
+        macro_result = self._process_macro_proposal(
+            action=action,
+            can_accept=bool(pipeline_result.passed_validation),
+            reject_reason="plan_validation_failed",
+        )
+
+        # 8. Build observation from updated state
         obs: ToolForgeObservation = self._get_observation()
 
-        # 8. Set reward from pipeline and attach lifecycle metadata
+        # 9. Set reward from pipeline and attach lifecycle metadata
         obs.reward = pipeline_result.final_score
         obs.done = self._is_done()
         obs.metadata = {
@@ -312,6 +333,11 @@ class ToolForgeEnvironment(Environment):
             "passed_validation": pipeline_result.passed_validation,
             "user_approved": True,
             "progression": progression,
+            "macro_attempted": macro_result["attempted"],
+            "macro_decision": macro_result["decision"],
+            "macro_name": macro_result["name"],
+            "macro_reason": macro_result["reason"],
+            "accepted_macro_count": len(self._state.accepted_macros),
         }
 
         logger.debug(
@@ -359,6 +385,167 @@ class ToolForgeEnvironment(Environment):
         )
         logger.debug("Next task prompt: %s", next_prompt)
         return True
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # *** _process_macro_proposal ***
+    # Deterministically accepts/rejects macro proposals and registers approved
+    # macros as reusable tools for future steps.
+    # ──────────────────────────────────────────────────────────────────────────
+    def _process_macro_proposal(
+        self,
+        action: ToolForgeAction,
+        can_accept: bool,
+        reject_reason: str,
+    ) -> Dict[str, Any]:
+        """Evaluate and apply macro proposal lifecycle for this step.
+
+        Args:
+            action: The submitted action containing optional macro proposal.
+            can_accept: Whether this step outcome allows macro acceptance.
+            reject_reason: Reason used when can_accept is False.
+
+        Returns:
+            Dict with macro decision fields for observation metadata.
+        """
+
+        result: Dict[str, Any] = {
+            "attempted": False,
+            "decision": "none",
+            "name": None,
+            "reason": "no_macro_proposal",
+        }
+
+        has_macro_intent = (
+            action.action_type == "propose_plan_with_macro"
+            or action.macro_proposal is not None
+        )
+        if not has_macro_intent:
+            return result
+
+        result["attempted"] = True
+
+        if action.action_type != "propose_plan_with_macro":
+            return self._reject_macro(
+                result=result,
+                name=action.macro_proposal.name if action.macro_proposal else None,
+                reason="macro_proposal_requires_propose_plan_with_macro_action_type",
+            )
+
+        if action.macro_proposal is None:
+            return self._reject_macro(
+                result=result,
+                name=None,
+                reason="missing_macro_proposal_payload",
+            )
+
+        proposal = action.macro_proposal
+        macro_name = proposal.name.strip()
+
+        if not can_accept:
+            return self._reject_macro(
+                result=result,
+                name=macro_name,
+                reason=reject_reason,
+            )
+
+        if not macro_name:
+            return self._reject_macro(
+                result=result,
+                name=None,
+                reason="macro_name_cannot_be_empty",
+            )
+
+        existing_names = {tool.name for tool in self._state.available_tools}
+        if macro_name in existing_names:
+            return self._reject_macro(
+                result=result,
+                name=macro_name,
+                reason="macro_name_already_exists",
+            )
+
+        if len(proposal.steps) < 2:
+            return self._reject_macro(
+                result=result,
+                name=macro_name,
+                reason="macro_requires_at_least_two_steps",
+            )
+
+        available_tools_by_name = {
+            tool.name: tool for tool in self._state.available_tools
+        }
+
+        missing_steps = [
+            call.tool_name
+            for call in proposal.steps
+            if call.tool_name not in available_tools_by_name
+        ]
+        if missing_steps:
+            return self._reject_macro(
+                result=result,
+                name=macro_name,
+                reason=f"macro_contains_unknown_tools:{','.join(missing_steps)}",
+            )
+
+        if any(
+            available_tools_by_name[call.tool_name].is_macro
+            for call in proposal.steps
+        ):
+            return self._reject_macro(
+                result=result,
+                name=macro_name,
+                reason="nested_macro_steps_not_supported",
+            )
+
+        composed_of: List[str] = [call.tool_name for call in proposal.steps]
+        atomic_cost_total = sum(
+            available_tools_by_name[tool_name].token_cost
+            for tool_name in composed_of
+        )
+
+        # A small deterministic discount creates immediate incentive for reuse.
+        macro_token_cost = max(1, atomic_cost_total - 2)
+
+        macro_tool = Tool(
+            name=macro_name,
+            description=proposal.description.strip() or f"Macro: {' -> '.join(composed_of)}",
+            params_schema={
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+            is_macro=True,
+            token_cost=macro_token_cost,
+            composed_of=composed_of,
+        )
+
+        self._state.accepted_macros.append(macro_tool)
+        self._state.available_tools.append(macro_tool)
+
+        result["decision"] = "approved"
+        result["name"] = macro_name
+        result["reason"] = f"macro_registered_token_cost:{macro_token_cost}"
+        logger.info(
+            "Macro approved: name='%s', steps=%s, token_cost=%d",
+            macro_name,
+            composed_of,
+            macro_token_cost,
+        )
+        return result
+
+    def _reject_macro(
+        self,
+        result: Dict[str, Any],
+        name: Optional[str],
+        reason: str,
+    ) -> Dict[str, Any]:
+        """Record a macro rejection and return standardized metadata payload."""
+
+        self._state.rejected_macro_count += 1
+        result["decision"] = "rejected"
+        result["name"] = name
+        result["reason"] = reason
+        logger.info("Macro rejected: name='%s', reason='%s'", name, reason)
+        return result
 
     # ──────────────────────────────────────────────────────────────────────────
     # *** _get_observation ***
