@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 """
 ToolForge Environment Client
 -----------------------------
@@ -101,106 +100,6 @@ class ToolForgeEnv(EnvClient[ToolForgeAction, ToolForgeObservation, ToolForgeSta
     # StepResult[ToolForgeObservation]. The server serialises the
     # observation into the "observation" sub-key inside "data".
     # ──────────────────────────────────────────────────────────────────────
-    def _parse_result(self, payload: dict) -> StepResult[ToolForgeObservation]:
-        """
-        Parse a server step/reset response into a StepResult.
-
-        Args:
-            payload: The JSON data dict from the server (the ``data`` field
-                     of the WebSocket observation response).
-
-        Returns:
-            StepResult wrapping a ToolForgeObservation.
-        """
-
-        # The server serializes the observation under the "observation" key
-        obs = ToolForgeObservation(**payload["observation"])
-
-        return StepResult(
-            observation=obs,
-            # reward is optional; default to None to match Observation base type
-            reward=payload.get("reward"),
-            done=bool(payload.get("done", False)),
-        )
-
-    # ──────────────────────────────────────────────────────────────────────
-    # *** _parse_state ***
-    # Converts the server's /state response JSON into a typed
-    # ToolForgeState. The server calls env.state and serializes it.
-    # ──────────────────────────────────────────────────────────────────────
-    def _parse_state(self, payload: dict) -> ToolForgeState:
-        """
-        Parse the server state response into a ToolForgeState object.
-
-        Args:
-            payload: The JSON data dict from the state WebSocket response.
-
-        Returns:
-            ToolForgeState populated from the server payload.
-        """
-
-        return ToolForgeState(**payload)
-=======
-# Copyright (c) Meta Platforms, Inc. and affiliates.
-# All rights reserved.
-#
-# This source code is licensed under the BSD-style license found in the
-# LICENSE file in the root directory of this source tree.
-
-"""Toolforge Env Environment Client."""
-
-from typing import Dict
-
-from openenv.core import EnvClient
-from openenv.core.client_types import StepResult
-from openenv.core.env_server.types import State
-
-from .models import ToolforgeAction, ToolforgeObservation
-
-
-class ToolforgeEnv(
-    EnvClient[ToolforgeAction, ToolforgeObservation, State]
-):
-    """
-    Client for the Toolforge Env Environment.
-
-    This client maintains a persistent WebSocket connection to the environment server,
-    enabling efficient multi-step interactions with lower latency.
-    Each client instance has its own dedicated environment session on the server.
-
-    Example:
-        >>> # Connect to a running server
-        >>> with ToolforgeEnv(base_url="http://localhost:8000") as client:
-        ...     result = client.reset()
-        ...     print(result.observation.echoed_message)
-        ...
-        ...     result = client.step(ToolforgeAction(message="Hello!"))
-        ...     print(result.observation.echoed_message)
-
-    Example with Docker:
-        >>> # Automatically start container and connect
-        >>> client = ToolforgeEnv.from_docker_image("toolforge_env-env:latest")
-        >>> try:
-        ...     result = client.reset()
-        ...     result = client.step(ToolforgeAction(message="Test"))
-        ... finally:
-        ...     client.close()
-    """
-
-    def _step_payload(self, action: ToolforgeAction) -> Dict:
-        """
-        Convert ToolforgeAction to JSON payload for step message.
-
-        Args:
-            action: ToolforgeAction instance
-
-        Returns:
-            Dictionary representation suitable for JSON encoding
-        """
-        return {
-            "message": action.message,
-        }
-
     def _parse_result(self, payload: Dict) -> StepResult[ToolforgeObservation]:
         """
         Parse server response into StepResult[ToolforgeObservation].
@@ -240,4 +139,3 @@ class ToolforgeEnv(
             episode_id=payload.get("episode_id"),
             step_count=payload.get("step_count", 0),
         )
->>>>>>> origin/environment-rework

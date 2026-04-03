@@ -1,8 +1,3 @@
-<<<<<<< HEAD
-"""
-Server package for toolforge_env
-"""
-=======
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -14,4 +9,3 @@ Server package for toolforge_env
 from .toolforge_env_environment import ToolforgeEnvironment
 
 __all__ = ["ToolforgeEnvironment"]
->>>>>>> origin/environment-rework

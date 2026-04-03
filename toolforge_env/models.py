@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel
@@ -6,23 +5,6 @@ from pydantic import BaseModel
 from openenv.core.env_server.types import Action, Observation, State
 
 
-=======
-# Copyright (c) Meta Platforms, Inc. and affiliates.
-# All rights reserved.
-#
-# This source code is licensed under the BSD-style license found in the
-# LICENSE file in the root directory of this source tree.
-
-"""
-Data models for the Toolforge Env Environment.
-
-The toolforge_env environment is a simple test environment that echoes back messages.
-"""
-
-from openenv.core.env_server.types import Action, Observation, State
-from typing import Any, Dict, List, Literal, Optional
-from pydantic import Field, BaseModel
->>>>>>> origin/environment-rework
 
 class ToolCall(BaseModel):
     """
@@ -39,10 +21,6 @@ class ToolCall(BaseModel):
     token_cost: int
 
 
-<<<<<<< HEAD
-
-=======
->>>>>>> origin/environment-rework
 class Tool(BaseModel):
     """
     Represents an available tool in the environment.
@@ -67,7 +45,6 @@ class Tool(BaseModel):
     composed_of: Optional[List[str]] = None
 
 
-<<<<<<< HEAD
 
 class Task(BaseModel):
     """
@@ -97,28 +74,6 @@ class Task(BaseModel):
     baseline_token_cost: int
 
 
-=======
-class Task(BaseModel):
-    """
-    Represents a DevOps task that the agent needs to accomplish.
-    Contains the prompt, difficulty, and expected steps for completion.
-    """
-    # Unique identifier for the task
-    id: str
-    
-    # The user-facing prompt describing the task
-    prompt: str
-    
-    # The difficulty level of the task
-    difficulty: Literal["easy", "medium", "hard"]
-    
-    # The exact list of steps required to complete the task
-    required_steps: List[str]
-    
-    # The core, essential steps identifying the task's primary goal
-    core_steps: List[str]
-
->>>>>>> origin/environment-rework
 
 class MacroProposal(BaseModel):
     """
@@ -135,7 +90,6 @@ class MacroProposal(BaseModel):
     steps: List[ToolCall]
 
 
-<<<<<<< HEAD
 class ValidationResult(BaseModel):
     """
     Output of the Stage-1 algorithmic validator.
@@ -286,45 +240,6 @@ class ToolForgeObservation(Observation):
     # Macros that have been approved and are active
     accepted_macros: List[Tool]
 
-=======
-class ToolforgeAction(Action):
-    """Action for the Toolforge Env environment - just a message to echo."""
-
-    # The type of action being performed
-    action_type: Literal["propose_plan", "propose_plan_with_macro"] = Field(
-        ..., description="The type of action being performed"
-    )
-
-    # The execution plan consisting of sequential tool calls
-    plan: List[ToolCall] = Field(
-        ..., description="The execution plan consisting of sequential tool calls"
-    )
-
-    # Optional proposal for a new macro, if action_type is "propose_plan_with_macro"
-    macro_proposal: Optional[MacroProposal] = Field(
-        None,
-        description="Optional proposal for a new macro, used when action_type is 'propose_plan_with_macro'"
-    )
-
-    # Agent's reasoning for this action
-    reasoning: str = Field(
-        ..., description="Agent's reasoning for this action"
-    )
-
-
-class ToolforgeObservation(Observation):
-    """Observation from the Toolforge Env environment - the echoed message."""
-
-    # The active task the agent must complete
-    current_task: Task = Field(
-        ..., description="The active task the agent must complete"
-    )
-
-    # List of tools currently available to the agent
-    available_tools: List[Tool] = Field(
-        ..., description="List of tools currently available to the agent"
-    )
->>>>>>> origin/environment-rework
 
 
 class ToolForgeState(State):
@@ -356,16 +271,9 @@ class ToolForgeState(State):
     
     # Total accumulated token cost
     tokens_used: int
-<<<<<<< HEAD
 
     # Whether the simulated user approved the latest submitted plan
     last_approval: Optional[bool] = None
     
     # Flag indicating if the environment episode has concluded
     done: bool
-=======
-    
-    # Flag indicating if the environment episode has concluded
-    done: bool
-
->>>>>>> origin/environment-rework
