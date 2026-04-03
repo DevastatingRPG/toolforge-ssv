@@ -63,6 +63,10 @@ class ToolForgeEnvironment(Environment):
     # no shared mutable state exists between instances.
     SUPPORTS_CONCURRENT_SESSIONS: bool = True
 
+    # Hard guardrail to ensure episodes terminate deterministically even if the
+    # agent keeps submitting malformed or low-quality plans.
+    MAX_EPISODE_STEPS: int = 100
+
     def __init__(self) -> None:
         """
         Initialize the ToolForge environment with safe, deterministic defaults.
@@ -188,8 +192,12 @@ class ToolForgeEnvironment(Environment):
 
         Performs deterministic accounting (step_count, call_history,
         tokens_used), runs the judge pipeline to produce a reward, and
-        returns an observation. Task advancement and macro acceptance
-        logic are not yet implemented.
+        returns an observation. Macro acceptance is not yet implemented.
+
+        Temporary progression rule for Step-1 lifecycle hardening:
+            - If a plan passes structural validation, current task is treated as
+              complete and the environment advances to the next queued task.
+            - If validation fails, the agent retries the current task.
 
         Args:
             action:    The agent's proposed plan (ToolForgeAction).
@@ -206,6 +214,18 @@ class ToolForgeEnvironment(Environment):
             raise ValueError(
                 f"Expected ToolForgeAction, got {type(action).__name__}"
             )
+
+        # If a caller keeps stepping after terminal state, return a stable
+        # terminal observation instead of mutating state.
+        if self._is_done():
+            obs_terminal: ToolForgeObservation = self._get_observation()
+            obs_terminal.done = True
+            obs_terminal.reward = 0.0
+            obs_terminal.metadata = {
+                "summary": "Episode already completed.",
+                "terminal": True,
+            }
+            return obs_terminal
 
         # 1. Increment step counter
         self._state.step_count += 1
@@ -227,16 +247,27 @@ class ToolForgeEnvironment(Environment):
             baseline_token_cost=self._state.current_task.baseline_token_cost,
         )
 
-        # 4. Build observation from updated state
+        # 4. Lifecycle control (Step-1): enforce max-step guardrail and
+        # temporary task progression policy.
+        progression = "retry_current_task"
+        if self._state.step_count >= self.MAX_EPISODE_STEPS:
+            self._state.done = True
+            progression = "episode_terminated_max_steps"
+        elif pipeline_result.passed_validation:
+            advanced = self._advance_to_next_task()
+            progression = "advanced_to_next_task" if advanced else "episode_completed"
+
+        # 5. Build observation from updated state
         obs: ToolForgeObservation = self._get_observation()
 
-        # 5. Set reward from pipeline and attach lightweight metadata
+        # 6. Set reward from pipeline and attach lifecycle metadata
         obs.reward = pipeline_result.final_score
         obs.done = self._is_done()
         obs.metadata = {
             "stub": True,
             "summary": pipeline_result.summary,
             "passed_validation": pipeline_result.passed_validation,
+            "progression": progression,
         }
 
         logger.debug(
@@ -248,6 +279,40 @@ class ToolForgeEnvironment(Environment):
         )
 
         return obs
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # *** _advance_to_next_task ***
+    # Marks current task complete and loads the next queued task, if available.
+    # Returns True when a new task is loaded, False when the episode is complete.
+    # ──────────────────────────────────────────────────────────────────────────
+    def _advance_to_next_task(self) -> bool:
+        """
+        Advance from current task to the next queued task.
+
+        Returns:
+            bool: True if next task was loaded, False if queue is exhausted.
+        """
+
+        completed_task_id = self._state.current_task.id
+        self._state.completed_tasks.append(self._state.current_task)
+
+        if len(self._state.task_queue) == 0:
+            self._state.done = True
+            logger.info(
+                "Episode complete. Final task '%s' finished; no tasks remain.",
+                completed_task_id,
+            )
+            return False
+
+        next_task = self._state.task_queue.pop(0)
+        self._state.current_task = next_task
+        logger.info(
+            "Task advanced from '%s' to '%s'. Remaining tasks=%d",
+            completed_task_id,
+            next_task.id,
+            len(self._state.task_queue),
+        )
+        return True
 
     # ──────────────────────────────────────────────────────────────────────────
     # *** _get_observation ***
@@ -301,15 +366,15 @@ class ToolForgeEnvironment(Environment):
         """
         Return True when the current episode should terminate.
 
-        Currently delegates to the done flag on ToolForgeState.
-        Future logic will additionally check: task_queue empty,
-        step limit exceeded, and unrecoverable error states.
+        Episode is considered done when either:
+            - The explicit state.done flag is set, or
+            - The max-step guardrail is reached.
 
         Returns:
             bool: True if the episode is over, False otherwise.
         """
 
-        return bool(self._state.done)
+        return bool(self._state.done) or self._state.step_count >= self.MAX_EPISODE_STEPS
 
     # ──────────────────────────────────────────────────────────────────────────
     # *** state (property) ***
