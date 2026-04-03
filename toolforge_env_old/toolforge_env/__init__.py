@@ -1,3 +1,0 @@
-"""
-toolforge_env package
-"""

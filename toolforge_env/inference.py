@@ -131,7 +131,7 @@ def get_model_message(client: OpenAI, step: int, last_echoed: str, last_reward: 
 async def main() -> None:
     client = OpenAI(base_url=API_BASE_URL, api_key=API_KEY)
 
-    env = await MyEnvV4Env.from_docker_image(IMAGE_NAME)
+    env = await ToolforgeEnv.from_docker_image(IMAGE_NAME)
 
     history: List[str] = []
     rewards: List[float] = []
@@ -152,7 +152,7 @@ async def main() -> None:
 
             message = get_model_message(client, step, last_echoed, last_reward, history)
 
-            result = await env.step(MyEnvV4Action(message=message))
+            result = await env.step(ToolforgeAction(message=message))
             obs = result.observation
 
             reward = result.reward or 0.0
