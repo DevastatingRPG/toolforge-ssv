@@ -107,6 +107,7 @@ class ToolForgeEnvironment(Environment):
             rejected_macro_count=0,
             call_history=[],
             tokens_used=0,
+            last_approval=None,
             done=True,
         )
 
@@ -164,6 +165,7 @@ class ToolForgeEnvironment(Environment):
         # active task, leaving the rest in the queue.
         full_queue = build_easy_task_queue(task_id=task_id)
         first_task = full_queue.pop(0)
+        initial_prompt = self._user.generate_task_prompt(first_task)
 
         # ── State construction ──────────────────────────────────────────────
         self._state = ToolForgeState(
@@ -177,10 +179,18 @@ class ToolForgeEnvironment(Environment):
             rejected_macro_count=0,
             call_history=[],
             tokens_used=0,
+            last_approval=None,
             done=False,
         )
 
-        return self._get_observation()
+        obs_initial = self._get_observation()
+        obs_initial.metadata = {
+            "summary": "Episode initialized.",
+            "user_prompt": initial_prompt,
+            "user_approved": None,
+            "progression": "episode_started",
+        }
+        return obs_initial
 
     def step(
         self,
@@ -191,13 +201,15 @@ class ToolForgeEnvironment(Environment):
         """Take a single step in the environment by executing an action plan.
 
         Performs deterministic accounting (step_count, call_history,
-        tokens_used), runs the judge pipeline to produce a reward, and
-        returns an observation. Macro acceptance is not yet implemented.
+        tokens_used), gates plans through simulated user approval, runs
+        the judge pipeline only for approved plans, and returns an
+        observation. Macro acceptance is not yet implemented.
 
-        Temporary progression rule for Step-1 lifecycle hardening:
-            - If a plan passes structural validation, current task is treated as
-              complete and the environment advances to the next queued task.
-            - If validation fails, the agent retries the current task.
+                Phase-2 progression and gating rules:
+                        - Plans rejected by the simulated user do not run through the
+                            judge pipeline and must retry the same task.
+                        - For user-approved plans, structural validation controls
+                            advancement to the next queued task.
 
         Args:
             action:    The agent's proposed plan (ToolForgeAction).
@@ -230,12 +242,44 @@ class ToolForgeEnvironment(Environment):
         # 1. Increment step counter
         self._state.step_count += 1
 
-        # 2. Record tool calls and accumulate token cost
+        # 2. Simulated user reviews the proposed plan before any pipeline run.
+        user_approved = self._user.evaluate_plan(action.plan, self._state.current_task)
+        self._state.last_approval = user_approved
+
+        # 3. Record tool calls and accumulate token cost
         for call in action.plan:
             self._state.call_history.append(call)
             self._state.tokens_used += call.token_cost
 
-        # 3. Run the judge pipeline (validator → slot judge → reward → token cost)
+        # 4. If the simulated user rejects the plan, skip judge pipeline and
+        # keep the current task active for retry.
+        if not user_approved:
+            progression = "retry_current_task_user_rejected"
+            if self._state.step_count >= self.MAX_EPISODE_STEPS:
+                self._state.done = True
+                progression = "episode_terminated_max_steps"
+
+            obs_rejected: ToolForgeObservation = self._get_observation()
+            obs_rejected.reward = 0.0
+            obs_rejected.done = self._is_done()
+            obs_rejected.metadata = {
+                "stub": True,
+                "summary": "User rejected plan. Retry current task.",
+                "passed_validation": None,
+                "user_approved": False,
+                "progression": progression,
+            }
+
+            logger.debug(
+                "step() | step_count=%d | tokens_used=%d | user_approved=%s | %s",
+                self._state.step_count,
+                self._state.tokens_used,
+                user_approved,
+                obs_rejected.metadata["summary"],
+            )
+            return obs_rejected
+
+        # 5. Run the judge pipeline (validator → slot judge → reward → token cost)
         available_tools_by_name = {
             tool.name: tool for tool in self._state.available_tools
         }
@@ -247,9 +291,8 @@ class ToolForgeEnvironment(Environment):
             baseline_token_cost=self._state.current_task.baseline_token_cost,
         )
 
-        # 4. Lifecycle control (Step-1): enforce max-step guardrail and
-        # temporary task progression policy.
-        progression = "retry_current_task"
+        # 6. Lifecycle control for approved plans.
+        progression = "retry_current_task_validation_failed"
         if self._state.step_count >= self.MAX_EPISODE_STEPS:
             self._state.done = True
             progression = "episode_terminated_max_steps"
@@ -257,16 +300,17 @@ class ToolForgeEnvironment(Environment):
             advanced = self._advance_to_next_task()
             progression = "advanced_to_next_task" if advanced else "episode_completed"
 
-        # 5. Build observation from updated state
+        # 7. Build observation from updated state
         obs: ToolForgeObservation = self._get_observation()
 
-        # 6. Set reward from pipeline and attach lifecycle metadata
+        # 8. Set reward from pipeline and attach lifecycle metadata
         obs.reward = pipeline_result.final_score
         obs.done = self._is_done()
         obs.metadata = {
             "stub": True,
             "summary": pipeline_result.summary,
             "passed_validation": pipeline_result.passed_validation,
+            "user_approved": True,
             "progression": progression,
         }
 
@@ -306,12 +350,14 @@ class ToolForgeEnvironment(Environment):
 
         next_task = self._state.task_queue.pop(0)
         self._state.current_task = next_task
+        next_prompt = self._user.generate_task_prompt(next_task)
         logger.info(
             "Task advanced from '%s' to '%s'. Remaining tasks=%d",
             completed_task_id,
             next_task.id,
             len(self._state.task_queue),
         )
+        logger.debug("Next task prompt: %s", next_prompt)
         return True
 
     # ──────────────────────────────────────────────────────────────────────────
@@ -343,8 +389,8 @@ class ToolForgeEnvironment(Environment):
             # Cumulative token cost incurred across all steps
             tokens_used=self._state.tokens_used,
 
-            # None until the simulated user has approved or rejected a plan
-            last_approval=None,
+            # Last simulated-user approval for the previous plan submission
+            last_approval=self._state.last_approval,
 
             # How many tasks remain after the current one
             tasks_remaining=len(self._state.task_queue),

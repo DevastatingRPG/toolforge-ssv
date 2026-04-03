@@ -272,6 +272,9 @@ class ToolForgeState(State):
     
     # Total accumulated token cost
     tokens_used: int
+
+    # Whether the simulated user approved the latest submitted plan
+    last_approval: Optional[bool] = None
     
     # Flag indicating if the environment episode has concluded
     done: bool
