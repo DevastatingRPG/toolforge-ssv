@@ -19,9 +19,11 @@ Usage (sync wrapper):
 """
 
 import logging
+from typing import Dict
 
 from openenv.core.client_types import StepResult
 from openenv.core.env_client import EnvClient
+from openenv.core.env_server.types import State
 
 from toolforge_env.models import ToolForgeAction, ToolForgeObservation, ToolForgeState
 
@@ -102,40 +104,30 @@ class ToolForgeEnv(EnvClient[ToolForgeAction, ToolForgeObservation, ToolForgeSta
     # ──────────────────────────────────────────────────────────────────────
     def _parse_result(self, payload: dict) -> StepResult[ToolForgeObservation]:
         """
-        Parse a server step/reset response into a StepResult.
+        Parse server response into StepResult[ToolForgeObservation].
 
         Args:
-            payload: The JSON data dict from the server (the ``data`` field
-                     of the WebSocket observation response).
+            payload: JSON response data from server
 
         Returns:
-            StepResult wrapping a ToolForgeObservation.
+            StepResult with ToolForgeObservation
         """
-
-        # The server serializes the observation under the "observation" key
-        obs = ToolForgeObservation(**payload["observation"])
+        obs = ToolForgeObservation(**payload.get("observation", {}))
 
         return StepResult(
             observation=obs,
-            # reward is optional; default to None to match Observation base type
             reward=payload.get("reward"),
             done=bool(payload.get("done", False)),
         )
 
-    # ──────────────────────────────────────────────────────────────────────
-    # *** _parse_state ***
-    # Converts the server's /state response JSON into a typed
-    # ToolForgeState. The server calls env.state and serializes it.
-    # ──────────────────────────────────────────────────────────────────────
     def _parse_state(self, payload: dict) -> ToolForgeState:
         """
-        Parse the server state response into a ToolForgeState object.
+        Parse server response into ToolForgeState object.
 
         Args:
-            payload: The JSON data dict from the state WebSocket response.
+            payload: JSON response from state request
 
         Returns:
-            ToolForgeState populated from the server payload.
+            ToolForgeState object populated from payload
         """
-
         return ToolForgeState(**payload)

@@ -21,7 +21,6 @@ class ToolCall(BaseModel):
     token_cost: int
 
 
-
 class Tool(BaseModel):
     """
     Represents an available tool in the environment.
