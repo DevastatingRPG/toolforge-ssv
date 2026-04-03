@@ -19,9 +19,11 @@ Usage (sync wrapper):
 """
 
 import logging
+from typing import Dict
 
 from openenv.core.client_types import StepResult
 from openenv.core.env_client import EnvClient
+from openenv.core.env_server.types import State
 
 from toolforge_env.models import ToolForgeAction, ToolForgeObservation, ToolForgeState
 
@@ -100,42 +102,32 @@ class ToolForgeEnv(EnvClient[ToolForgeAction, ToolForgeObservation, ToolForgeSta
     # StepResult[ToolForgeObservation]. The server serialises the
     # observation into the "observation" sub-key inside "data".
     # ──────────────────────────────────────────────────────────────────────
-    def _parse_result(self, payload: Dict) -> StepResult[ToolforgeObservation]:
+    def _parse_result(self, payload: dict) -> StepResult[ToolForgeObservation]:
         """
-        Parse server response into StepResult[ToolforgeObservation].
+        Parse server response into StepResult[ToolForgeObservation].
 
         Args:
             payload: JSON response data from server
 
         Returns:
-            StepResult with ToolforgeObservation
+            StepResult with ToolForgeObservation
         """
-        obs_data = payload.get("observation", {})
-        observation = ToolforgeObservation(
-            echoed_message=obs_data.get("echoed_message", ""),
-            message_length=obs_data.get("message_length", 0),
-            done=payload.get("done", False),
-            reward=payload.get("reward"),
-            metadata=obs_data.get("metadata", {}),
-        )
+        obs = ToolForgeObservation(**payload.get("observation", {}))
 
         return StepResult(
-            observation=observation,
+            observation=obs,
             reward=payload.get("reward"),
-            done=payload.get("done", False),
+            done=bool(payload.get("done", False)),
         )
 
-    def _parse_state(self, payload: Dict) -> State:
+    def _parse_state(self, payload: dict) -> ToolForgeState:
         """
-        Parse server response into State object.
+        Parse server response into ToolForgeState object.
 
         Args:
             payload: JSON response from state request
 
         Returns:
-            State object with episode_id and step_count
+            ToolForgeState object populated from payload
         """
-        return State(
-            episode_id=payload.get("episode_id"),
-            step_count=payload.get("step_count", 0),
-        )
+        return ToolForgeState(**payload)

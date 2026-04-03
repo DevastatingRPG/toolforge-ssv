@@ -6,6 +6,6 @@
 
 """Toolforge Env environment server components."""
 
-from .toolforge_env_environment import ToolforgeEnvironment
+from .toolforge_environment import ToolForgeEnvironment
 
-__all__ = ["ToolforgeEnvironment"]
+__all__ = ["ToolForgeEnvironment"]

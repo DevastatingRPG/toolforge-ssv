@@ -98,9 +98,9 @@ class ToolForgeEnvironment(Environment):
         # Marked done=True so any premature step() call is visibly wrong.
         dummy_task = build_easy_task_queue()[0]
         self._state: ToolForgeState = ToolForgeState(
-            episode_id=str(uuid4()),
+            episode_id=str(uuid.uuid4()),
             step_count=0,
-            current_task=default_task,
+            current_task=dummy_task,
             task_queue=[],
             completed_tasks=[],
             available_tools=[],
