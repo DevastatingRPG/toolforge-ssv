@@ -1,10 +1,25 @@
+[build-system]
+requires = ["setuptools>=45", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
-name = "openenv-ssv"
+name = "toolforge_env"
 version = "0.1.0"
-description = "Add your description here"
+description = "ToolForge DevOps Environment for OpenEnv"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "huggingface-hub>=1.8.0",
     "openenv-core>=0.2.3",
+    "fastapi",
+    "pydantic",
+    "uvicorn[standard]"
 ]
+
+[project.scripts]
+server = "toolforge_env.server.app:main"
+
+[tool.setuptools]
+include-package-data = true
+packages = ["toolforge_env", "toolforge_env.server"]
+package-dir = { "toolforge_env" = "toolforge_env/toolforge_env", "toolforge_env.server" = "toolforge_env/toolforge_env/server" }

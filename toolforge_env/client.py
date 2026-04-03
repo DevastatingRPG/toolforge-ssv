@@ -4,7 +4,7 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
-"""Ssv Environment Client."""
+"""Toolforge Env Environment Client."""
 
 from typing import Dict
 
@@ -12,14 +12,14 @@ from openenv.core import EnvClient
 from openenv.core.client_types import StepResult
 from openenv.core.env_server.types import State
 
-from .models import SsvAction, SsvObservation
+from .models import ToolforgeAction, ToolforgeObservation
 
 
-class SsvEnv(
-    EnvClient[SsvAction, SsvObservation, State]
+class ToolforgeEnv(
+    EnvClient[ToolforgeAction, ToolforgeObservation, State]
 ):
     """
-    Client for the Ssv Environment.
+    Client for the Toolforge Env Environment.
 
     This client maintains a persistent WebSocket connection to the environment server,
     enabling efficient multi-step interactions with lower latency.
@@ -27,51 +27,50 @@ class SsvEnv(
 
     Example:
         >>> # Connect to a running server
-        >>> with SsvEnv(base_url="http://localhost:8000") as client:
+        >>> with ToolforgeEnv(base_url="http://localhost:8000") as client:
         ...     result = client.reset()
         ...     print(result.observation.echoed_message)
         ...
-        ...     result = client.step(SsvAction(message="Hello!"))
+        ...     result = client.step(ToolforgeAction(message="Hello!"))
         ...     print(result.observation.echoed_message)
 
     Example with Docker:
         >>> # Automatically start container and connect
-        >>> client = SsvEnv.from_docker_image("ssv-env:latest")
+        >>> client = ToolforgeEnv.from_docker_image("toolforge_env-env:latest")
         >>> try:
         ...     result = client.reset()
-        ...     result = client.step(SsvAction(message="Test"))
+        ...     result = client.step(ToolforgeAction(message="Test"))
         ... finally:
         ...     client.close()
     """
 
-    def _step_payload(self, action: SsvAction) -> Dict:
+    def _step_payload(self, action: ToolforgeAction) -> Dict:
         """
-        Convert SsvAction to JSON payload for step message.
+        Convert ToolforgeAction to JSON payload for step message.
 
         Args:
-            action: SsvAction instance
+            action: ToolforgeAction instance
 
         Returns:
             Dictionary representation suitable for JSON encoding
         """
         return {
-            "message": action.message,
+            "action_type": action.action_type,
         }
 
-    def _parse_result(self, payload: Dict) -> StepResult[SsvObservation]:
+    def _parse_result(self, payload: Dict) -> StepResult[ToolforgeObservation]:
         """
-        Parse server response into StepResult[SsvObservation].
+        Parse server response into StepResult[ToolforgeObservation].
 
         Args:
             payload: JSON response data from server
 
         Returns:
-            StepResult with SsvObservation
+            StepResult with ToolforgeObservation
         """
         obs_data = payload.get("observation", {})
-        observation = SsvObservation(
-            echoed_message=obs_data.get("echoed_message", ""),
-            message_length=obs_data.get("message_length", 0),
+        observation = ToolforgeObservation(
+            **obs_data,
             done=payload.get("done", False),
             reward=payload.get("reward"),
             metadata=obs_data.get("metadata", {}),

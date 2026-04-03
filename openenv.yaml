@@ -1,7 +1,6 @@
 spec_version: 1
-name: ssv
+name: toolforge_env
 type: space
 runtime: fastapi
-app: server.app:app
+app: toolforge_env.server.app:app
 port: 8000
-

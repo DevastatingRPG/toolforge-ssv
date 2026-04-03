@@ -9,9 +9,9 @@ requires = ["setuptools>=45", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "openenv-ssv"
+name = "openenv-toolforge_env"
 version = "0.1.0"
-description = "Ssv environment for OpenEnv"
+description = "Toolforge Env environment for OpenEnv"
 requires-python = ">=3.10"
 dependencies = [
     # Core OpenEnv runtime (provides FastAPI server + HTTP client types)
@@ -36,10 +36,10 @@ dev = [
 
 [project.scripts]
 # Server entry point - enables running via: uv run --project . server
-# or: python -m ssv.server.app
-server = "ssv.server.app:main"
+# or: python -m toolforge_env.server.app
+server = "toolforge_env.server.app:main"
 
 [tool.setuptools]
 include-package-data = true
-packages = ["ssv", "ssv.server"]
-package-dir = { "ssv" = ".", "ssv.server" = "server" }
+packages = ["toolforge_env", "toolforge_env.server"]
+package-dir = { "toolforge_env" = ".", "toolforge_env.server" = "server" }

@@ -5,9 +5,9 @@
 # LICENSE file in the root directory of this source tree.
 
 """
-FastAPI application for the Ssv Environment.
+FastAPI application for the Toolforge Env Environment.
 
-This module creates an HTTP server that exposes the SsvEnvironment
+This module creates an HTTP server that exposes the ToolforgeEnvironment
 over HTTP and WebSocket endpoints, compatible with EnvClient.
 
 Endpoints:
@@ -36,19 +36,19 @@ except Exception as e:  # pragma: no cover
     ) from e
 
 try:
-    from ..models import SsvAction, SsvObservation
-    from .ssv_environment import SsvEnvironment
+    from ..models import ToolforgeAction, ToolforgeObservation
+    from .toolforge_env_environment import ToolforgeEnvironment
 except ModuleNotFoundError:
-    from models import SsvAction, SsvObservation
-    from server.ssv_environment import SsvEnvironment
+    from models import ToolforgeAction, ToolforgeObservation
+    from server.toolforge_env_environment import ToolforgeEnvironment
 
 
 # Create the app with web interface and README integration
 app = create_app(
-    SsvEnvironment,
-    SsvAction,
-    SsvObservation,
-    env_name="ssv",
+    ToolforgeEnvironment,
+    ToolforgeAction,
+    ToolforgeObservation,
+    env_name="toolforge_env",
     max_concurrent_envs=1,  # increase this number to allow more concurrent WebSocket sessions
 )
 
@@ -60,7 +60,7 @@ def main(host: str = "0.0.0.0", port: int = 8000):
     This function enables running the server without Docker:
         uv run --project . server
         uv run --project . server --port 8001
-        python -m ssv.server.app
+        python -m toolforge_env.server.app
 
     Args:
         host: Host address to bind to (default: "0.0.0.0")
@@ -68,14 +68,14 @@ def main(host: str = "0.0.0.0", port: int = 8000):
 
     For production deployments, consider using uvicorn directly with
     multiple workers:
-        uvicorn ssv.server.app:app --workers 4
+        uvicorn toolforge_env.server.app:app --workers 4
     """
     import uvicorn
 
     uvicorn.run(app, host=host, port=port)
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     import argparse
 
     parser = argparse.ArgumentParser()

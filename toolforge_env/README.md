@@ -1,8 +1,8 @@
 ---
-title: Ssv Environment Server
-emoji: 🏸
-colorFrom: gray
-colorTo: yellow
+title: Toolforge Env Environment Server
+emoji: 🎼
+colorFrom: indigo
+colorTo: purple
 sdk: docker
 pinned: false
 app_port: 8000
@@ -11,30 +11,30 @@ tags:
   - openenv
 ---
 
-# Ssv Environment
+# Toolforge Env Environment
 
 A simple test environment that echoes back messages. Perfect for testing the env APIs as well as demonstrating environment usage patterns.
 
 ## Quick Start
 
-The simplest way to use the Ssv environment is through the `SsvEnv` class:
+The simplest way to use the Toolforge Env environment is through the `ToolforgeEnv` class:
 
 ```python
-from ssv import SsvAction, SsvEnv
+from toolforge_env import ToolforgeAction, ToolforgeEnv
 
 try:
     # Create environment from Docker image
-    ssvenv = SsvEnv.from_docker_image("ssv-env:latest")
+    toolforge_envenv = ToolforgeEnv.from_docker_image("toolforge_env-env:latest")
 
     # Reset
-    result = ssvenv.reset()
+    result = toolforge_envenv.reset()
     print(f"Reset: {result.observation.echoed_message}")
 
     # Send multiple messages
     messages = ["Hello, World!", "Testing echo", "Final message"]
 
     for msg in messages:
-        result = ssvenv.step(SsvAction(message=msg))
+        result = toolforge_envenv.step(ToolforgeAction(message=msg))
         print(f"Sent: '{msg}'")
         print(f"  → Echoed: '{result.observation.echoed_message}'")
         print(f"  → Length: {result.observation.message_length}")
@@ -42,10 +42,10 @@ try:
 
 finally:
     # Always clean up
-    ssvenv.close()
+    toolforge_envenv.close()
 ```
 
-That's it! The `SsvEnv.from_docker_image()` method handles:
+That's it! The `ToolforgeEnv.from_docker_image()` method handles:
 - Starting the Docker container
 - Waiting for the server to be ready
 - Connecting to the environment
@@ -57,7 +57,7 @@ Before using the environment, you need to build the Docker image:
 
 ```bash
 # From project root
-docker build -t ssv-env:latest -f server/Dockerfile .
+docker build -t toolforge_env-env:latest -f server/Dockerfile .
 ```
 
 ## Deploying to Hugging Face Spaces
@@ -119,11 +119,11 @@ The deployed space includes:
 ## Environment Details
 
 ### Action
-**SsvAction**: Contains a single field
+**ToolforgeAction**: Contains a single field
 - `message` (str) - The message to echo back
 
 ### Observation
-**SsvObservation**: Contains the echo response and metadata
+**ToolforgeObservation**: Contains the echo response and metadata
 - `echoed_message` (str) - The message echoed back
 - `message_length` (int) - Length of the message
 - `reward` (float) - Reward based on message length (length × 0.1)
@@ -140,35 +140,35 @@ The reward is calculated as: `message_length × 0.1`
 
 ### Connecting to an Existing Server
 
-If you already have a Ssv environment server running, you can connect directly:
+If you already have a Toolforge Env environment server running, you can connect directly:
 
 ```python
-from ssv import SsvEnv
+from toolforge_env import ToolforgeEnv
 
 # Connect to existing server
-ssvenv = SsvEnv(base_url="<ENV_HTTP_URL_HERE>")
+toolforge_envenv = ToolforgeEnv(base_url="<ENV_HTTP_URL_HERE>")
 
 # Use as normal
-result = ssvenv.reset()
-result = ssvenv.step(SsvAction(message="Hello!"))
+result = toolforge_envenv.reset()
+result = toolforge_envenv.step(ToolforgeAction(message="Hello!"))
 ```
 
-Note: When connecting to an existing server, `ssvenv.close()` will NOT stop the server.
+Note: When connecting to an existing server, `toolforge_envenv.close()` will NOT stop the server.
 
 ### Using the Context Manager
 
 The client supports context manager usage for automatic connection management:
 
 ```python
-from ssv import SsvAction, SsvEnv
+from toolforge_env import ToolforgeAction, ToolforgeEnv
 
 # Connect with context manager (auto-connects and closes)
-with SsvEnv(base_url="http://localhost:8000") as env:
+with ToolforgeEnv(base_url="http://localhost:8000") as env:
     result = env.reset()
     print(f"Reset: {result.observation.echoed_message}")
     # Multiple steps with low latency
     for msg in ["Hello", "World", "!"]:
-        result = env.step(SsvAction(message=msg))
+        result = env.step(ToolforgeAction(message=msg))
         print(f"Echoed: {result.observation.echoed_message}")
 ```
 
@@ -185,9 +185,9 @@ modify `server/app.py` to use factory mode:
 ```python
 # In server/app.py - use factory mode for concurrent sessions
 app = create_app(
-    SsvEnvironment,  # Pass class, not instance
-    SsvAction,
-    SsvObservation,
+    ToolforgeEnvironment,  # Pass class, not instance
+    ToolforgeAction,
+    ToolforgeObservation,
     max_concurrent_envs=4,  # Allow 4 concurrent sessions
 )
 ```
@@ -195,14 +195,14 @@ app = create_app(
 Then multiple clients can connect simultaneously:
 
 ```python
-from ssv import SsvAction, SsvEnv
+from toolforge_env import ToolforgeAction, ToolforgeEnv
 from concurrent.futures import ThreadPoolExecutor
 
 def run_episode(client_id: int):
-    with SsvEnv(base_url="http://localhost:8000") as env:
+    with ToolforgeEnv(base_url="http://localhost:8000") as env:
         result = env.reset()
         for i in range(10):
-            result = env.step(SsvAction(message=f"Client {client_id}, step {i}"))
+            result = env.step(ToolforgeAction(message=f"Client {client_id}, step {i}"))
         return client_id, result.observation.message_length
 
 # Run 4 episodes concurrently
@@ -218,7 +218,7 @@ Test the environment logic directly without starting the HTTP server:
 
 ```bash
 # From the server directory
-python3 server/ssv_environment.py
+python3 server/toolforge_env_environment.py
 ```
 
 This verifies that:
@@ -238,18 +238,18 @@ uvicorn server.app:app --reload
 ## Project Structure
 
 ```
-ssv/
+toolforge_env/
 ├── .dockerignore         # Docker build exclusions
 ├── __init__.py            # Module exports
 ├── README.md              # This file
 ├── openenv.yaml           # OpenEnv manifest
 ├── pyproject.toml         # Project metadata and dependencies
 ├── uv.lock                # Locked dependencies (generated)
-├── client.py              # SsvEnv client
+├── client.py              # ToolforgeEnv client
 ├── models.py              # Action and Observation models
 └── server/
     ├── __init__.py        # Server module exports
-    ├── ssv_environment.py  # Core environment logic
+    ├── toolforge_env_environment.py  # Core environment logic
     ├── app.py             # FastAPI application (HTTP + WebSocket endpoints)
     └── Dockerfile         # Container image definition
 ```
