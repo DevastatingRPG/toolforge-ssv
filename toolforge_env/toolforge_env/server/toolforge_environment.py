@@ -26,6 +26,7 @@ from openenv.core.env_server.types import EnvironmentMetadata
 
 from toolforge_env.models import (
     Tool,
+    ToolCall,
     ToolForgeAction,
     ToolForgeObservation,
     ToolForgeState,
@@ -67,6 +68,10 @@ class ToolForgeEnvironment(Environment):
     # Hard guardrail to ensure episodes terminate deterministically even if the
     # agent keeps submitting malformed or low-quality plans.
     MAX_EPISODE_STEPS: int = 100
+
+    # Deterministic fallback cost used when the agent calls an unknown tool.
+    # This prevents client-side token_cost spoofing while keeping step() stable.
+    UNKNOWN_TOOL_CALL_TOKEN_COST: int = 20
 
     def __init__(self) -> None:
         """
@@ -214,6 +219,11 @@ class ToolForgeEnvironment(Environment):
             - Macro proposals are accepted/rejected deterministically and
               approved macros are registered as reusable tools.
 
+                Phase-4 token-integrity rules:
+                        - Client-provided ToolCall.token_cost values are not trusted.
+                        - Token accounting is computed from server-side tool registry.
+                        - Unknown tools use a deterministic fallback token cost.
+
         Args:
             action:    The agent's proposed plan (ToolForgeAction).
             timeout_s: Execution timeout (reserved; unused).
@@ -222,13 +232,21 @@ class ToolForgeEnvironment(Environment):
         Returns:
             ToolForgeObservation reflecting state after the action.
 
-        Raises:
-            ValueError: If action is not a ToolForgeAction instance.
         """
         if not isinstance(action, ToolForgeAction):
-            raise ValueError(
-                f"Expected ToolForgeAction, got {type(action).__name__}"
+            logger.warning(
+                "Malformed action rejected. Expected ToolForgeAction, got %s",
+                type(action).__name__,
             )
+            malformed_obs: ToolForgeObservation = self._get_observation()
+            malformed_obs.reward = 0.0
+            malformed_obs.done = self._is_done()
+            malformed_obs.metadata = {
+                "summary": "Malformed action rejected.",
+                "malformed_action": True,
+                "progression": "retry_current_task_malformed_action",
+            }
+            return malformed_obs
 
         # If a caller keeps stepping after terminal state, return a stable
         # terminal observation instead of mutating state.
@@ -249,12 +267,24 @@ class ToolForgeEnvironment(Environment):
         user_approved = self._user.evaluate_plan(action.plan, self._state.current_task)
         self._state.last_approval = user_approved
 
-        # 3. Record tool calls and accumulate token cost
+        # 3. Compute authoritative token accounting using server-side tool
+        # registry, then record call history. Client token_cost is ignored.
+        token_accounting = self._compute_plan_token_cost(action.plan)
+        step_token_cost = token_accounting["step_token_cost"]
+        unknown_tool_calls = token_accounting["unknown_tool_calls"]
+
+        # 4. Record tool calls and accumulate token cost
         for call in action.plan:
             self._state.call_history.append(call)
-            self._state.tokens_used += call.token_cost
+        self._state.tokens_used += step_token_cost
 
-        # 4. If the simulated user rejects the plan, skip judge pipeline and
+        if len(unknown_tool_calls) > 0:
+            logger.warning(
+                "Applied fallback token cost for unknown tools: %s",
+                unknown_tool_calls,
+            )
+
+        # 5. If the simulated user rejects the plan, skip judge pipeline and
         # keep the current task active for retry.
         if not user_approved:
             progression = "retry_current_task_user_rejected"
@@ -282,6 +312,9 @@ class ToolForgeEnvironment(Environment):
                 "macro_name": macro_result["name"],
                 "macro_reason": macro_result["reason"],
                 "accepted_macro_count": len(self._state.accepted_macros),
+                "step_token_cost": step_token_cost,
+                "token_accounting_source": "tool_registry",
+                "unknown_tool_calls": unknown_tool_calls,
             }
 
             logger.debug(
@@ -293,7 +326,7 @@ class ToolForgeEnvironment(Environment):
             )
             return obs_rejected
 
-        # 5. Run the judge pipeline (validator -> slot judge -> reward -> token cost)
+        # 6. Run the judge pipeline (validator -> slot judge -> reward -> token cost)
         available_tools_by_name = {
             tool.name: tool for tool in self._state.available_tools
         }
@@ -305,7 +338,7 @@ class ToolForgeEnvironment(Environment):
             baseline_token_cost=self._state.current_task.baseline_token_cost,
         )
 
-        # 6. Lifecycle control for approved plans.
+        # 7. Lifecycle control for approved plans.
         progression = "retry_current_task_validation_failed"
         if self._state.step_count >= self.MAX_EPISODE_STEPS:
             self._state.done = True
@@ -314,17 +347,17 @@ class ToolForgeEnvironment(Environment):
             advanced = self._advance_to_next_task()
             progression = "advanced_to_next_task" if advanced else "episode_completed"
 
-        # 7. Process macro proposal lifecycle after plan-level outcome is known.
+        # 8. Process macro proposal lifecycle after plan-level outcome is known.
         macro_result = self._process_macro_proposal(
             action=action,
             can_accept=bool(pipeline_result.passed_validation),
             reject_reason="plan_validation_failed",
         )
 
-        # 8. Build observation from updated state
+        # 9. Build observation from updated state
         obs: ToolForgeObservation = self._get_observation()
 
-        # 9. Set reward from pipeline and attach lifecycle metadata
+        # 10. Set reward from pipeline and attach lifecycle metadata
         obs.reward = pipeline_result.final_score
         obs.done = self._is_done()
         obs.metadata = {
@@ -338,12 +371,16 @@ class ToolForgeEnvironment(Environment):
             "macro_name": macro_result["name"],
             "macro_reason": macro_result["reason"],
             "accepted_macro_count": len(self._state.accepted_macros),
+            "step_token_cost": step_token_cost,
+            "token_accounting_source": "tool_registry",
+            "unknown_tool_calls": unknown_tool_calls,
         }
 
         logger.debug(
-            "step() | step_count=%d | tokens_used=%d | score=%.3f | %s",
+            "step() | step_count=%d | tokens_used=%d | step_token_cost=%d | score=%.3f | %s",
             self._state.step_count,
             self._state.tokens_used,
+            step_token_cost,
             pipeline_result.final_score,
             pipeline_result.summary,
         )
@@ -385,6 +422,43 @@ class ToolForgeEnvironment(Environment):
         )
         logger.debug("Next task prompt: %s", next_prompt)
         return True
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # *** _compute_plan_token_cost ***
+    # Computes per-step token usage from authoritative tool definitions.
+    # Client-provided ToolCall.token_cost is intentionally ignored.
+    # ──────────────────────────────────────────────────────────────────────────
+    def _compute_plan_token_cost(self, plan: List[ToolCall]) -> Dict[str, Any]:
+        """Return deterministic token accounting for the submitted plan.
+
+        Args:
+            plan: Ordered list of tool calls submitted by the agent.
+
+        Returns:
+            Dict containing:
+                - step_token_cost: total cost applied for this step
+                - unknown_tool_calls: list of unknown tool names encountered
+        """
+
+        available_tools_by_name = {
+            tool.name: tool for tool in self._state.available_tools
+        }
+        unknown_tool_calls: List[str] = []
+        step_token_cost = 0
+
+        for call in plan:
+            tool_def = available_tools_by_name.get(call.tool_name)
+            if tool_def is None:
+                step_token_cost += self.UNKNOWN_TOOL_CALL_TOKEN_COST
+                unknown_tool_calls.append(call.tool_name)
+                continue
+
+            step_token_cost += tool_def.token_cost
+
+        return {
+            "step_token_cost": step_token_cost,
+            "unknown_tool_calls": unknown_tool_calls,
+        }
 
     # ──────────────────────────────────────────────────────────────────────────
     # *** _process_macro_proposal ***
