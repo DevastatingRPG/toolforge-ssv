@@ -94,12 +94,13 @@ def log_end(success: bool, steps: int, score: float, rewards: List[float]) -> No
     print(f"[END] success={str(success).lower()} steps={steps} score={score:.3f} rewards={rewards_str}", flush=True)
 
 
-def build_user_prompt(step: int, last_echoed: str, last_reward: float, history: List[str]) -> str:
+def build_user_prompt(step: int, current_task: str, available_tools: List[str], last_reward: float, history: List[str]) -> str:
     history_block = "\n".join(history[-4:]) if history else "None"
     return textwrap.dedent(
         f"""
         Step: {step}
-        Last echoed message: {last_echoed!r}
+        Current task: {current_task!r}
+        Available tools: {available_tools}
         Last reward: {last_reward:.2f}
         Previous steps:
         {history_block}
@@ -108,8 +109,8 @@ def build_user_prompt(step: int, last_echoed: str, last_reward: float, history: 
     ).strip()
 
 
-def get_model_message(client: OpenAI, step: int, last_echoed: str, last_reward: float, history: List[str]) -> str:
-    user_prompt = build_user_prompt(step, last_echoed, last_reward, history)
+def get_model_message(client: OpenAI, step: int, current_task: str, available_tools: List[str], last_reward: float, history: List[str]) -> str:
+    user_prompt = build_user_prompt(step, current_task, available_tools, last_reward, history)
     try:
         completion = client.chat.completions.create(
             model=MODEL_NAME,
@@ -142,15 +143,18 @@ async def main() -> None:
     log_start(task=TASK_NAME, env=BENCHMARK, model=MODEL_NAME)
 
     try:
-        result = await env.reset() # OpenENV.reset()
-        last_echoed = result.observation.echoed_message
+        result = await env.reset(task=TASK_NAME) # OpenENV.reset()
+        obs = result.observation
+        task = obs.current_task
+        active_tools = obs.available_tools
+        history = obs.history
         last_reward = 0.0
 
         for step in range(1, MAX_STEPS + 1):
             if result.done:
                 break
 
-            message = get_model_message(client, step, last_echoed, last_reward, history)
+            message = get_model_message(client, step, task.prompt, active_tools, last_reward, history)
 
             result = await env.step(ToolforgeAction(message=message))
             obs = result.observation
