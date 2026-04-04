@@ -53,25 +53,34 @@ class Tool(BaseModel):
     composed_of: Optional[List[str]] = None
 
 
+
 class Task(BaseModel):
     """
     Represents a DevOps task that the agent needs to accomplish.
-    Contains the prompt, difficulty, and expected steps for completion.
+    Contains the prompt, difficulty, expected steps, semantic slots,
+    and baseline token cost for grading.
     """
     # Unique identifier for the task
     id: str
-    
+
     # The user-facing prompt describing the task
     prompt: str
-    
+
     # The difficulty level of the task
     difficulty: Literal["easy", "medium", "hard"]
-    
+
     # The exact list of steps required to complete the task
     required_steps: List[str]
-    
+
     # The core, essential steps identifying the task's primary goal
     core_steps: List[str]
+
+    # Semantic slot names the judge checks against (e.g. DEPLOYMENT_ACTION)
+    required_slots: List[str]
+
+    # Naive token cost of executing the task's intended atomic sequence
+    baseline_token_cost: int
+
 
 
 class MacroProposal(BaseModel):
