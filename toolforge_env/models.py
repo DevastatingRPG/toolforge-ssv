@@ -53,25 +53,34 @@ class Tool(BaseModel):
     composed_of: Optional[List[str]] = None
 
 
+
 class Task(BaseModel):
     """
     Represents a DevOps task that the agent needs to accomplish.
-    Contains the prompt, difficulty, and expected steps for completion.
+    Contains the prompt, difficulty, expected steps, semantic slots,
+    and baseline token cost for grading.
     """
     # Unique identifier for the task
     id: str
-    
+
     # The user-facing prompt describing the task
     prompt: str
-    
+
     # The difficulty level of the task
     difficulty: Literal["easy", "medium", "hard"]
-    
+
     # The exact list of steps required to complete the task
     required_steps: List[str]
-    
+
     # The core, essential steps identifying the task's primary goal
     core_steps: List[str]
+
+    # Semantic slot names the judge checks against (e.g. DEPLOYMENT_ACTION)
+    required_slots: List[str]
+
+    # Naive token cost of executing the task's intended atomic sequence
+    baseline_token_cost: int
+
 
 
 class MacroProposal(BaseModel):
@@ -160,4 +169,96 @@ class ToolForgeState(State):
     
     # Flag indicating if the environment episode has concluded
     done: bool
+
+
+class PlanAccuracyResult(BaseModel):
+    """Output of the Stage-3 plan accuracy calculator."""
+    # Fraction of required slots successfully filled
+    slot_completion_ratio: float
+    # Score generated from completion curve (<= 0)
+    slot_score: float
+    # Penalty magnitude for unnecessary steps (<= 0)
+    unnecessary_penalty: float
+    # Final Stage 3 score bounded [-1.0, 0.0]
+    score: float
+    # Named sub-scores for debugging/logging
+    breakdown: Dict[str, float]
+
+
+class ToolEvaluation(BaseModel):
+    """
+    Per-tool-call evaluation produced by the Stage-2 semantic slot judge.
+    """
+    # Index of this tool call within the submitted plan
+    tool_call_index: int
+
+    # Name of the tool that was called
+    tool_name: str
+
+    # Which semantic slot this call fills, if any
+    fills_slot: Optional[str]
+
+    # Classification decided by the simulated LLM judge
+    classification: Literal["relevant", "unnecessary", "harmful"]
+
+    # Short explanation of the judgment
+    reason: str
+
+
+class SlotJudgmentResult(BaseModel):
+    """
+    Aggregate output of the Stage-2 semantic slot judge.
+    Contains per-call evaluations plus slot-level summary.
+    """
+    # One ToolEvaluation per tool call in the plan
+    evaluations: List[ToolEvaluation]
+
+    # Slot names that were successfully filled
+    slots_filled: List[str]
+
+    # Slot names that remain unfulfilled
+    slots_missing: List[str]
+
+    # Whether all required slots were filled
+    task_complete: bool
+
+    # Flag set if any tool call was classified as harmful
+    harmful_calls_present: bool
+
+
+class TokenCostResult(BaseModel):
+    """Output of the Stage-4 token-cost calculator."""
+    # Actual tokens consumed by the plan
+    tokens_used: int
+    # Naive baseline cost for comparison
+    baseline_tokens: int
+    # tokens_used / baseline_tokens (lower is better)
+    efficiency_ratio: float
+    # Normalised efficiency score (0.0–1.0, higher is better)
+    efficiency_score: float
+    # Tokens saved through macro reuse
+    macro_savings: int
+    # Bonus points applied when a macro is used efficiently
+    macro_bonus: float
+
+
+class PipelineResult(BaseModel):
+    """Aggregate output of the full judge pipeline."""
+    # Stage-1 validation result (always present)
+    validation: ValidationResult
+    # Stage-2 slot judgment (None when validation fails)
+    slot_judgment: Optional[SlotJudgmentResult] = None
+    # Stage-3 plan accuracy (None when validation fails or harmful)
+    plan_accuracy: Optional[PlanAccuracyResult] = None
+    # Stage-4 token cost (None when validation fails or harmful)
+    token_cost: Optional[TokenCostResult] = None
+    # Final blended score clamped to [-1.0, 1.0]
+    reward: float
+    # Whether the plan passed structural validation
+    passed_validation: bool
+    # Human-readable one-line summary
+    summary: str
+
+
+
 
