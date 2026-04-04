@@ -28,6 +28,7 @@ try:
         ToolforgeObservation,
         ToolForgeState,
         Task,
+        ValidationResult
     )
 except ImportError:
     from models import (
@@ -37,16 +38,16 @@ except ImportError:
         ToolforgeObservation,
         ToolForgeState,
         Task,
+        ValidationResult
     )
 
 try:
     from .tools import build_atomic_tools
-    from .judge_pipeline import run_judge_pipeline
+    from .evaluation_pipeline import run_evaluation_pipeline
     from .inputs.simulated.data_loader import SimulatedDataLoader
 except ImportError:
-    import tasks as task_catalog
     from tools import build_atomic_tools
-    from judge_pipeline import run_judge_pipeline
+    from evaluation_pipeline import run_evaluation_pipeline
     from inputs.simulated.data_loader import SimulatedDataLoader
 
 
@@ -257,7 +258,7 @@ class ToolforgeEnvironment(Environment):
         available_tools_by_name = {
             tool.name: tool for tool in self._state.available_tools
         }
-        pipeline_result = run_judge_pipeline(
+        pipeline_result = run_evaluation_pipeline(
             plan=action.plan,
             task=self._state.current_task,
             available_tools=available_tools_by_name,

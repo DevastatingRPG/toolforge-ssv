@@ -241,6 +241,24 @@ class TokenCostResult(BaseModel):
     # Bonus points applied when a macro is used efficiently
     macro_bonus: float
 
+class ValidationResult(BaseModel):
+    """
+    Output of the Stage-1 algorithmic validator.
+    Indicates whether a proposed plan is structurally valid.
+    """
+    # Whether the plan passed all structural checks
+    valid: bool
+
+    # Machine-readable reason code:
+    # VALID | EMPTY_PLAN | INVALID_TOOL | MISSING_PARAM | EXTRA_PARAM
+    reason: str
+
+    # Reward penalty to apply (0.0 for valid, negative otherwise)
+    penalty: float
+
+    # Optional human-readable detail (e.g. which tool/param failed)
+    detail: Optional[str] = None
+
 
 class PipelineResult(BaseModel):
     """Aggregate output of the full judge pipeline."""
