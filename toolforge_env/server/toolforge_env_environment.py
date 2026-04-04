@@ -15,6 +15,7 @@ from uuid import uuid4
 
 from openenv.core.env_server.interfaces import Environment
 from openenv.core.env_server.types import State
+from inputs.base import InputProvider
 from typing import Optional
 
 try:
@@ -46,7 +47,7 @@ class ToolforgeEnvironment(Environment):
     # getting their own environment instance (when using factory mode in app.py).
     SUPPORTS_CONCURRENT_SESSIONS: bool = True
 
-    def __init__(self, input_provider=None):
+    def __init__(self, input_provider: InputProvider):
         """Initialize the toolforge_env environment."""
         self._state = self._create_default_state()
         self._reset_count = 0
