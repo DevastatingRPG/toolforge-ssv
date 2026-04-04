@@ -40,7 +40,6 @@ except ImportError:
     )
 
 try:
-    from . import tasks as task_catalog
     from .tools import build_atomic_tools
     from .judge_pipeline import run_judge_pipeline
     from .inputs.simulated.data_loader import SimulatedDataLoader
