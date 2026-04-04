@@ -122,8 +122,8 @@ class ToolEvaluation(BaseModel):
     # Which semantic slot this call fills, if any
     fills_slot: Optional[str]
 
-    # Whether this call was judged correct for the slot
-    correct: bool
+    # Classification decided by the simulated LLM judge
+    classification: Literal["relevant", "unnecessary", "harmful"]
 
     # Short explanation of the judgment
     reason: str
@@ -146,17 +146,20 @@ class SlotJudgmentResult(BaseModel):
     # Whether all required slots were filled
     task_complete: bool
 
+    # Flag set if any tool call was classified as harmful
+    harmful_calls_present: bool
 
-class RewardResult(BaseModel):
-    """Output of the Stage-3 reward calculator."""
-    # Fraction of task correctness achieved (0.0–1.0)
-    correctness_score: float
-    # Fraction of semantic slots filled (0.0–1.0)
+
+class PlanAccuracyResult(BaseModel):
+    """Output of the Stage-3 plan accuracy calculator."""
+    # Fraction of required slots successfully filled
+    slot_completion_ratio: float
+    # Score generated from completion curve (<= 0)
     slot_score: float
-    # Penalty applied from validation or behavioural issues
-    penalty: float
-    # Combined raw score before efficiency weighting
-    raw_score: float
+    # Penalty magnitude for unnecessary steps (<= 0)
+    unnecessary_penalty: float
+    # Final Stage 3 score bounded [-1.0, 0.0]
+    score: float
     # Named sub-scores for debugging/logging
     breakdown: Dict[str, float]
 
@@ -173,6 +176,8 @@ class TokenCostResult(BaseModel):
     efficiency_score: float
     # Tokens saved through macro reuse
     macro_savings: int
+    # Bonus points applied when a macro is used efficiently
+    macro_bonus: float
 
 
 class PipelineResult(BaseModel):
@@ -181,12 +186,12 @@ class PipelineResult(BaseModel):
     validation: ValidationResult
     # Stage-2 slot judgment (None when validation fails)
     slot_judgment: Optional[SlotJudgmentResult] = None
-    # Stage-3 reward (None when validation fails)
-    reward: Optional[RewardResult] = None
-    # Stage-4 token cost (None when validation fails)
+    # Stage-3 plan accuracy (None when validation fails or harmful)
+    plan_accuracy: Optional[PlanAccuracyResult] = None
+    # Stage-4 token cost (None when validation fails or harmful)
     token_cost: Optional[TokenCostResult] = None
-    # Final blended score clamped to [0.0, 1.0]
-    final_score: float
+    # Final blended score clamped to [-1.0, 1.0]
+    reward: float
     # Whether the plan passed structural validation
     passed_validation: bool
     # Human-readable one-line summary

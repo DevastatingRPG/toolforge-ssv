@@ -31,7 +31,7 @@ from toolforge_env.models import (
     ToolForgeObservation,
     ToolForgeState,
 )
-from toolforge_env.server.judge_pipeline import run_judge_pipeline
+from toolforge_env.server.evaluation_pipeline import run_evaluation_pipeline
 from toolforge_env.server.tools import build_atomic_tools
 from toolforge_env.server.tasks import build_easy_task_queue
 from toolforge_env.server.user_sim import SimulatedUser
@@ -330,7 +330,7 @@ class ToolForgeEnvironment(Environment):
         available_tools_by_name = {
             tool.name: tool for tool in self._state.available_tools
         }
-        pipeline_result = run_judge_pipeline(
+        pipeline_result = run_evaluation_pipeline(
             plan=action.plan,
             task=self._state.current_task,
             available_tools=available_tools_by_name,
@@ -358,7 +358,7 @@ class ToolForgeEnvironment(Environment):
         obs: ToolForgeObservation = self._get_observation()
 
         # 10. Set reward from pipeline and attach lifecycle metadata
-        obs.reward = pipeline_result.final_score
+        obs.reward = pipeline_result.reward
         obs.done = self._is_done()
         obs.metadata = {
             "stub": True,
@@ -381,7 +381,7 @@ class ToolForgeEnvironment(Environment):
             self._state.step_count,
             self._state.tokens_used,
             step_token_cost,
-            pipeline_result.final_score,
+            pipeline_result.reward,
             pipeline_result.summary,
         )
 
