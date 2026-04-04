@@ -46,10 +46,11 @@ class ToolforgeEnvironment(Environment):
     # getting their own environment instance (when using factory mode in app.py).
     SUPPORTS_CONCURRENT_SESSIONS: bool = True
 
-    def __init__(self):
+    def __init__(self, input_provider=None):
         """Initialize the toolforge_env environment."""
         self._state = self._create_default_state()
         self._reset_count = 0
+        self._input_provider = input_provider
 
     def _create_default_state(self) -> ToolForgeState:
         """
