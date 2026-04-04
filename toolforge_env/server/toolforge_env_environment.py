@@ -171,7 +171,7 @@ class ToolforgeEnvironment(Environment):
         # subsequent resets ignore incoming values
         task_list = self.task_selector.next_task_list(self.difficulty)
 
-        self.input_provider = self.input_provider_factory(task_list)
+        self.input_provider = self._input_provider_factory(task_list)
         first_task = self._get_next_task_from_generator()
         self._state.current_task = first_task
         self._sync_task_queue_from_generator()
