@@ -17,6 +17,7 @@ from openenv.core.env_server.interfaces import Environment
 from openenv.core.env_server.types import State
 from inputs.base import InputProvider
 from typing import Optional
+from server.inputs.simulated.task_selector import TaskSelector
 
 try:
     from ..models import ToolforgeAction, ToolforgeObservation, ToolForgeState, Task
@@ -47,11 +48,20 @@ class ToolforgeEnvironment(Environment):
     # getting their own environment instance (when using factory mode in app.py).
     SUPPORTS_CONCURRENT_SESSIONS: bool = True
 
-    def __init__(self, input_provider: InputProvider):
+    def __init__(self, task_selector: TaskSelector, input_provider_factory):
         """Initialize the toolforge_env environment."""
         self._state = self._create_default_state()
         self._reset_count = 0
-        self._input_provider = input_provider
+
+        self.task_selector = task_selector
+        self.input_provider_factory = input_provider_factory
+
+        self.input_provider = None
+
+        # persistent config
+        self.mode = None
+        self.difficulty: str = "easy"
+        self.initialized = False
 
     def _create_default_state(self) -> ToolForgeState:
         """
@@ -112,6 +122,20 @@ class ToolforgeEnvironment(Environment):
         self._state = self._create_default_state()
         self._state.episode_id = ep_id
         self._reset_count += 1
+
+        if not self.initialized:
+            self.mode = kwargs.get("mode", "eval")
+            self.difficulty = kwargs.get("difficulty", "easy")
+
+            from server.inputs.simulated.task_selector import TaskSelector
+            self.task_selector = TaskSelector(mode=self.mode)
+
+            self.initialized = True
+        
+        # subsequent resets ignore incoming values
+        task_list = self.task_selector.next_task_list(self.difficulty)
+
+        self.input_provider = self.input_provider_factory(task_list)
 
         return self._create_default_observation()
 

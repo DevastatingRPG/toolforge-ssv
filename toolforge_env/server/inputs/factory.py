@@ -1,9 +1,5 @@
-from server.inputs.simulated.data_loader import SimulatedDataLoader
-from tasks import _EASY_TASKS
+from .simulated.data_loader import SimulatedDataLoader
 
-def create_input_provider():
-    """Factory for input providers (currently only simulated)."""
 
-    data = _EASY_TASKS
-
-    return SimulatedDataLoader(data=data)
+def create_input_provider(task_list):
+    return SimulatedDataLoader(task_list=task_list)
