@@ -1,39 +1,20 @@
 """Semantic slot definitions for the ToolForge judge.
 
-Each slot represents a high-level *intent* that a tool call can fulfil
-within a DevOps workflow. The judge maps concrete tool calls to these
-abstract slots when evaluating whether a plan satisfies a task.
-
-This file is pure constants — no functions, no side effects.
+Each slot represents a granular action phase (execution, verification, notification)
+within a DevOps workflow. Mapped by the Stage-2 semantic judge.
 """
 
-# Maps slot name → natural-language description of the intent.
-# The description is used by the Stage-2 semantic judge to determine
-# whether a given tool call fills the slot.
 DEVOPS_SLOTS = {
-    "DEPLOYMENT_ACTION": (
-        "An action that deploys, releases, pushes, or ships a new version "
-        "of a service into a target environment."
-    ),
-    "VERIFICATION_ACTION": (
-        "An action that checks, tests, pings, or validates that a service "
-        "is healthy and operating correctly."
-    ),
-    "NOTIFICATION_ACTION": (
-        "An action that informs, alerts, or notifies a person or channel "
-        "about the outcome of an operation."
-    ),
-    "ROLLBACK_ACTION": (
-        "An action that reverts or restores a service to a previous stable "
-        "version after a failed change."
-    ),
-    "SCALING_ACTION": (
-        "An action that increases or decreases the capacity of a service "
-        "by adjusting its replica count or resource allocation."
-    ),
-    "CONFIGURATION_ACTION": (
-        "An action that modifies the runtime configuration of a service, "
-        "such as restarting it, toggling feature flags, or updating "
-        "environment variables."
-    ),
+    "deployment_execution": "Execute a deployment or release of a new version to a target environment.",
+    "deployment_verification": "Check health, ping, or verify a newly deployed service is healthy.",
+    "deployment_notification": "Notify or alert a channel/person that a deployment has finished.",
+    "rollback_execution": "Revert or restore a service to a previous stable state.",
+    "rollback_verification": "Verify the health or stability of a rolled-back service.",
+    "rollback_notification": "Send an alert or message indicating a rollback event occurred.",
+    "scaling_execution": "Increase or decrease the replica count or scale a service.",
+    "scaling_verification": "Verify that the service is healthy and stabilized after scaling.",
+    "scaling_notification": "Notify stakeholders that a service scaling event occurred.",
+    "restart_execution": "Restart, bounce, or cycle a service instance.",
+    "restart_verification": "Verify the service is running properly after being restarted.",
+    "restart_notification": "Notify stakeholders that a service has been restarted.",
 }
