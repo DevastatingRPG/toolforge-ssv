@@ -54,9 +54,7 @@ class ToolforgeEnv(
         Returns:
             Dictionary representation suitable for JSON encoding
         """
-        return {
-            "action_type": action.action_type,
-        }
+        return action.model_dump(mode="json", exclude_none=True)
 
     def _parse_result(self, payload: Dict) -> StepResult[ToolforgeObservation]:
         """
