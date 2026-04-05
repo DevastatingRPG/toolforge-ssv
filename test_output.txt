@@ -1,0 +1,163 @@
+﻿python : 
+INFO:__main__:================================================================================
+At line:1 char:100
++ ... ivate.ps1"; cd toolforge_env; python test_environment.py 2>&1 | Out-F ...
++                                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (INFO:__main__:=...===============:String) [], Remot 
+   eException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+INFO:__main__:TEST: Environment Reset and Step
+INFO:__main__:================================================================================
+INFO:__main__:\u2713 Environment created successfully
+INFO:server.tools:Building fresh atomic tools list.
+INFO:__main__:\u2713 Reset successful
+INFO:__main__:  Episode ID: test-episode-001
+INFO:__main__:  Initial Task: easy-deploy-notify
+INFO:__main__:  Task Prompt: Deploy the 'frontend-web' service version 'v2.1.0', check it...
+INFO:__main__:  Task Difficulty: easy
+INFO:__main__:  Required Slots: ['deployment_execution', 'deployment_verification', 
+'deployment_notification']
+INFO:__main__:  Baseline Call Count: 3
+INFO:__main__:  Available Tools: 6
+INFO:__main__:  Done: False
+INFO:__main__:  Reward: 0.0
+INFO:__main__:
+================================================================================
+INFO:__main__:STEPPING THROUGH EPISODE
+INFO:__main__:================================================================================
+INFO:__main__:
+--- Step 1 ---
+INFO:__main__:Current Task ID: easy-deploy-notify
+INFO:__main__:Available Tools: ['deploy', 'healthcheck', 'notify', 'rollback', 'scale', 
+'restart']
+INFO:__main__:Action Plan: ['deploy', 'healthcheck']
+INFO:server.toolforge_env_environment:Task advanced from 'easy-deploy-notify' to 
+'easy-deploy-restart'. Remaining tasks=0
+INFO:__main__:\u2713 Step executed
+INFO:__main__:  Reward: -0.366
+INFO:__main__:  Done: False
+INFO:__main__:  Step Count in State: 1
+INFO:__main__:  Tokens Used: 12
+INFO:__main__:  Tasks Completed: 1
+INFO:__main__:  Remaining Tasks in Queue: 0
+INFO:__main__:  Next Task ID: easy-deploy-restart
+INFO:__main__:  Progression: advanced_to_next_task
+INFO:__main__:  Plan Accepted: True
+INFO:__main__:  Macro Attempted: False
+INFO:__main__:
+--- Step 2 ---
+INFO:__main__:Current Task ID: easy-deploy-restart
+INFO:__main__:Available Tools: ['deploy', 'healthcheck', 'notify', 'rollback', 'scale', 
+'restart']
+INFO:__main__:Action Plan: ['deploy', 'healthcheck']
+INFO:server.toolforge_env_environment:Task advanced from 'easy-deploy-restart' to 
+'easy-deploy-scale'. Remaining tasks=0
+INFO:__main__:\u2713 Step executed
+INFO:__main__:  Reward: -0.435
+INFO:__main__:  Done: False
+INFO:__main__:  Step Count in State: 2
+INFO:__main__:  Tokens Used: 24
+INFO:__main__:  Tasks Completed: 2
+INFO:__main__:  Remaining Tasks in Queue: 0
+INFO:__main__:  Next Task ID: easy-deploy-scale
+INFO:__main__:  Progression: advanced_to_next_task
+INFO:__main__:  Plan Accepted: True
+INFO:__main__:  Macro Attempted: False
+INFO:__main__:
+--- Step 3 ---
+INFO:__main__:Current Task ID: easy-deploy-scale
+INFO:__main__:Available Tools: ['deploy', 'healthcheck', 'notify', 'rollback', 'scale', 
+'restart']
+INFO:__main__:Action Plan: ['deploy', 'healthcheck']
+INFO:server.toolforge_env_environment:Episode complete. Final task 'easy-deploy-scale' finished; 
+no tasks remain.
+INFO:__main__:\u2713 Step executed
+INFO:__main__:  Reward: -0.422
+INFO:__main__:  Done: True
+INFO:__main__:  Step Count in State: 3
+INFO:__main__:  Tokens Used: 36
+INFO:__main__:  Tasks Completed: 3
+INFO:__main__:  Remaining Tasks in Queue: 0
+INFO:__main__:  Progression: episode_completed
+INFO:__main__:  Plan Accepted: True
+INFO:__main__:  Macro Attempted: False
+INFO:__main__:
+================================================================================
+INFO:__main__:EPISODE SUMMARY
+INFO:__main__:================================================================================
+INFO:__main__:Total Steps Executed: 3
+INFO:__main__:Final State Step Count: 3
+INFO:__main__:Tasks Completed: 3
+INFO:__main__:Accepted Macros: 0
+INFO:__main__:Rejected Macros: 0
+INFO:__main__:Total Tokens Used: 36
+INFO:__main__:Episode Done: True
+INFO:__main__:Final Observation Done: True
+INFO:__main__:
+Completed Tasks:
+INFO:__main__:  - easy-deploy-notify (easy)
+INFO:__main__:  - easy-deploy-restart (easy)
+INFO:__main__:  - easy-deploy-scale (easy)
+INFO:__main__:
+\u2713 All assertions passed!
+INFO:__main__:================================================================================
+INFO:__main__:
+
+================================================================================
+INFO:__main__:TEST: Multiple Tasks in Easy Mode
+INFO:__main__:================================================================================
+INFO:server.tools:Building fresh atomic tools list.
+INFO:__main__:\u2713 Reset successful for multi-task test
+INFO:__main__:  Initial Task Queue Size: 0
+INFO:__main__:
+Step 1: Task 'easy-deploy-notify'
+INFO:__main__:  Difficulty: easy
+INFO:__main__:  Queue Size: 0
+INFO:server.toolforge_env_environment:Task advanced from 'easy-deploy-notify' to 
+'easy-deploy-restart'. Remaining tasks=0
+INFO:__main__:
+Step 2: Task 'easy-deploy-restart'
+INFO:__main__:  Difficulty: easy
+INFO:__main__:  Queue Size: 0
+INFO:server.toolforge_env_environment:Task advanced from 'easy-deploy-restart' to 
+'easy-deploy-scale'. Remaining tasks=0
+INFO:__main__:
+Step 3: Task 'easy-deploy-scale'
+INFO:__main__:  Difficulty: easy
+INFO:__main__:  Queue Size: 0
+INFO:server.toolforge_env_environment:Episode complete. Final task 'easy-deploy-scale' finished; 
+no tasks remain.
+INFO:__main__:
+\u2713 Multi-task test completed
+INFO:__main__:  Total Steps: 3
+INFO:__main__:  Unique Tasks Seen: 3
+INFO:__main__:  Tasks Completed: 3
+INFO:__main__:  Episode Done: True
+INFO:__main__:\u2713 Multi-task test passed!
+INFO:__main__:================================================================================
+INFO:__main__:
+
+\U0001f389 \U0001f389 \U0001f389 \U0001f389 \U0001f389 \U0001f389 \U0001f389 \U0001f389 
+\U0001f389 \U0001f389 \U0001f389 \U0001f389 \U0001f389 \U0001f389 \U0001f389 \U0001f389 
+\U0001f389 \U0001f389 \U0001f389 \U0001f389 
+INFO:__main__:ALL TESTS PASSED!
+INFO:__main__:\U0001f389 \U0001f389 \U0001f389 \U0001f389 \U0001f389 \U0001f389 \U0001f389 
+\U0001f389 \U0001f389 \U0001f389 \U0001f389 \U0001f389 \U0001f389 \U0001f389 \U0001f389 
+\U0001f389 \U0001f389 \U0001f389 \U0001f389 \U0001f389 
+Fetched next task from input provider: easy-deploy-notify
+id='easy-deploy-notify' prompt="Deploy the 'frontend-web' service version 'v2.1.0', check its health, and notify the '#deployments' channel that it is done." difficulty='easy' required_slots=['deployment_execution', 'deployment_verification', 'deployment_notification'] baseline_call_count=3
+Fetched next task from input provider: easy-deploy-restart
+id='easy-deploy-restart' prompt="Deploy 'backend-api' version 'v1.4.2', check its health. It usually needs a restart after deployment, so restart it, check health again, and then notify '#backend-ops' that the deploy is complete." difficulty='easy' required_slots=['deployment_execution', 'deployment_verification', 'restart_execution', 'restart_verification', 'deployment_notification'] baseline_call_count=5
+Fetched next task from input provider: easy-deploy-scale
+id='easy-deploy-scale' prompt="Deploy 'analytics-engine' version 'v3.0.0', then quickly scale it to 10 replicas for the incoming load test. Check health to verify and notify '#data-team'." difficulty='easy' required_slots=['deployment_execution', 'scaling_execution', 'deployment_verification', 'deployment_notification'] baseline_call_count=4
+SHIT DONE True
+[Task(id='easy-deploy-notify', prompt="Deploy the 'frontend-web' service version 'v2.1.0', check its health, and notify the '#deployments' channel that it is done.", difficulty='easy', required_slots=['deployment_execution', 'deployment_verification', 'deployment_notification'], baseline_call_count=3), Task(id='easy-deploy-restart', prompt="Deploy 'backend-api' version 'v1.4.2', check its health. It usually needs a restart after deployment, so restart it, check health again, and then notify '#backend-ops' that the deploy is complete.", difficulty='easy', required_slots=['deployment_execution', 'deployment_verification', 'restart_execution', 'restart_verification', 'deployment_notification'], baseline_call_count=5), Task(id='easy-deploy-scale', prompt="Deploy 'analytics-engine' version 'v3.0.0', then quickly scale it to 10 replicas for the incoming load test. Check health to verify and notify '#data-team'.", difficulty='easy', required_slots=['deployment_execution', 'scaling_execution', 'deployment_verification', 'deployment_notification'], baseline_call_count=4)]
+Fetched next task from input provider: easy-deploy-notify
+id='easy-deploy-notify' prompt="Deploy the 'frontend-web' service version 'v2.1.0', check its health, and notify the '#deployments' channel that it is done." difficulty='easy' required_slots=['deployment_execution', 'deployment_verification', 'deployment_notification'] baseline_call_count=3
+Fetched next task from input provider: easy-deploy-restart
+id='easy-deploy-restart' prompt="Deploy 'backend-api' version 'v1.4.2', check its health. It usually needs a restart after deployment, so restart it, check health again, and then notify '#backend-ops' that the deploy is complete." difficulty='easy' required_slots=['deployment_execution', 'deployment_verification', 'restart_execution', 'restart_verification', 'deployment_notification'] baseline_call_count=5
+Fetched next task from input provider: easy-deploy-scale
+id='easy-deploy-scale' prompt="Deploy 'analytics-engine' version 'v3.0.0', then quickly scale it to 10 replicas for the incoming load test. Check health to verify and notify '#data-team'." difficulty='easy' required_slots=['deployment_execution', 'scaling_execution', 'deployment_verification', 'deployment_notification'] baseline_call_count=4
+SHIT DONE True
+[Task(id='easy-deploy-notify', prompt="Deploy the 'frontend-web' service version 'v2.1.0', check its health, and notify the '#deployments' channel that it is done.", difficulty='easy', required_slots=['deployment_execution', 'deployment_verification', 'deployment_notification'], baseline_call_count=3), Task(id='easy-deploy-restart', prompt="Deploy 'backend-api' version 'v1.4.2', check its health. It usually needs a restart after deployment, so restart it, check health again, and then notify '#backend-ops' that the deploy is complete.", difficulty='easy', required_slots=['deployment_execution', 'deployment_verification', 'restart_execution', 'restart_verification', 'deployment_notification'], baseline_call_count=5), Task(id='easy-deploy-scale', prompt="Deploy 'analytics-engine' version 'v3.0.0', then quickly scale it to 10 replicas for the incoming load test. Check health to verify and notify '#data-team'.", difficulty='easy', required_slots=['deployment_execution', 'scaling_execution', 'deployment_verification', 'deployment_notification'], baseline_call_count=4)]
