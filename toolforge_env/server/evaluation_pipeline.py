@@ -30,9 +30,7 @@ def run_evaluation_pipeline(
     plan: List[ToolCall],
     task: Task,
     available_tools: Dict[str, Tool],
-    accepted_macros: List[Tool],
-    baseline_token_cost: int,
-    goal_achieved: bool = False,
+    accepted_macros: List[Tool]
 ) -> PipelineResult:
     """Run the evaluation pipeline on a proposed plan."""
     
@@ -77,15 +75,15 @@ def run_evaluation_pipeline(
         validation_result=validation,
         slot_judgment=slot_judgment,
         task=task,
-        goal_achieved=goal_achieved,
+        goal_achieved=False,
     )
 
     # 4. run_token_calculation(...)
     token_cost = run_token_calculation(
         plan=plan,
-        accepted_macros=accepted_macros,
         task=task,
         available_tools=available_tools,
+        accepted_macros=accepted_macros,
     )
 
     # 5. reward_calculation(...)

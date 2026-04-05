@@ -69,17 +69,11 @@ class Task(BaseModel):
     # The difficulty level of the task
     difficulty: Literal["easy", "medium", "hard"]
 
-    # The exact list of steps required to complete the task
-    required_steps: List[str]
-
-    # The core, essential steps identifying the task's primary goal
-    core_steps: List[str]
-
-    # Semantic slot names the judge checks against (e.g. DEPLOYMENT_ACTION)
+    # Semantic slot names the judge checks against (e.g. deployment_execution)
     required_slots: List[str]
 
-    # Naive token cost of executing the task's intended atomic sequence
-    baseline_token_cost: int
+    # The baseline number of tool calls minimally needed for a correct atomic solution
+    baseline_call_count: int
 
 
 

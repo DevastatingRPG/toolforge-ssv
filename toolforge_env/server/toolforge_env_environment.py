@@ -110,8 +110,8 @@ class ToolforgeEnvironment(Environment):
             id="default-task",
             prompt="Default task",
             difficulty="easy",
-            required_steps=[],
-            core_steps=[],
+            required_slots=[],
+            baseline_call_count=0,
         )
 
         return ToolForgeState(
@@ -263,7 +263,6 @@ class ToolforgeEnvironment(Environment):
             task=self._state.current_task,
             available_tools=available_tools_by_name,
             accepted_macros=self._state.accepted_macros,
-            baseline_token_cost=self._state.current_task.baseline_token_cost,
         )
         self._last_approval = bool(pipeline_result.passed_validation)
 
@@ -281,10 +280,8 @@ class ToolforgeEnvironment(Environment):
             reject_reason="plan_not_accepted",
         )
 
-        
-
-        # Simple reward: longer messages get higher rewards
-        reward = float(pipeline_result.final_score)
+        # Fetch the scalar reward from the evaluation pipeline
+        reward = float(pipeline_result.reward)
 
         return ToolforgeObservation(
             current_task=self._state.current_task,
