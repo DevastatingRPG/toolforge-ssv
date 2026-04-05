@@ -16,21 +16,11 @@ from uuid import uuid4
 
 from openenv.core.env_server.interfaces import Environment
 from openenv.core.env_server.types import EnvironmentMetadata, State
-from inputs.base import InputProvider
+from server.inputs.base import InputProvider
 from typing import Any, Dict, List, Optional
 from server.inputs.simulated.task_selector import TaskSelector
 
 try:
-    from ..models import (
-        Tool,
-        ToolCall,
-        ToolforgeAction,
-        ToolforgeObservation,
-        ToolForgeState,
-        Task,
-        ValidationResult
-    )
-except ImportError:
     from models import (
         Tool,
         ToolCall,
@@ -40,15 +30,23 @@ except ImportError:
         Task,
         ValidationResult
     )
+except ImportError:
+    from ..models import (
+        Tool,
+        ToolCall,
+        ToolforgeAction,
+        ToolforgeObservation,
+        ToolForgeState,
+        Task,
+        ValidationResult
+    )
 
 try:
+    from server.tools import build_atomic_tools
+    from server.evaluation_pipeline import run_evaluation_pipeline
+except ImportError:
     from .tools import build_atomic_tools
     from .evaluation_pipeline import run_evaluation_pipeline
-    from .inputs.simulated.data_loader import SimulatedDataLoader
-except ImportError:
-    from tools import build_atomic_tools
-    from evaluation_pipeline import run_evaluation_pipeline
-    from inputs.simulated.data_loader import SimulatedDataLoader
 
 
 logger = logging.getLogger(__name__)
@@ -110,7 +108,9 @@ class ToolforgeEnvironment(Environment):
             prompt="Default task",
             difficulty="easy",
             required_steps=[],
+            required_slots=[],
             core_steps=[],
+            baseline_token_cost=10
         )
 
         return ToolForgeState(
@@ -136,7 +136,9 @@ class ToolforgeEnvironment(Environment):
         """
         return ToolforgeObservation(
             current_task=self._state.current_task,
-            available_tools=self._state.available_tools,
+            available_tools=self._available_tools_to_prompt_specs(
+                    self._state.available_tools
+            )
         )
 
     def _tool_to_prompt_spec(self, tool: Tool) -> Dict[str, Any]:
@@ -191,7 +193,7 @@ class ToolforgeEnvironment(Environment):
         # subsequent resets ignore incoming values
         task_list = self.task_selector.next_task_list(self.difficulty)
 
-        self.input_provider = self._input_provider_factory(task_list)
+        self._input_provider = self._input_provider_factory(task_list)
         first_task = self._get_next_task_from_generator()
         self._state.current_task = first_task
         self._sync_task_queue_from_generator()
@@ -313,11 +315,14 @@ class ToolforgeEnvironment(Environment):
         
 
         # Simple reward: longer messages get higher rewards
-        reward = float(pipeline_result.final_score)
+        reward = float(0)
+        print(self._state.current_task)
 
         return ToolforgeObservation(
             current_task=self._state.current_task,
-            available_tools=self._state.available_tools,
+            available_tools=self._available_tools_to_prompt_specs(
+                self._state.available_tools
+            ),
             done=self._is_done(),
             reward=reward,
             metadata={
@@ -351,6 +356,8 @@ class ToolforgeEnvironment(Environment):
 
         if self._input_provider is None or self._input_provider.is_done():
             self._state.done = True
+            print("SHIT DONE", self._input_provider.is_done())
+            print(self._input_provider.tasks)
             self._state.task_queue = []
             logger.info(
                 "Episode complete. Final task '%s' finished; no tasks remain.",
@@ -544,8 +551,10 @@ class ToolforgeEnvironment(Environment):
 
         if self._input_provider is None:
             raise RuntimeError("Task data generator not initialized. Call reset() first.")
-
-        return self._input_provider.get_input()
+        task = self._input_provider.get_input()
+        print(f"Fetched next task from input provider: {task.id}")
+        print(task)
+        return task
 
     def _sync_task_queue_from_generator(self) -> None:
         """Best-effort sync of remaining tasks for state visibility."""

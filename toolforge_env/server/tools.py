@@ -2,7 +2,7 @@ import logging
 from typing import List
 
 # Internal imports for building Tool models
-from toolforge_env.models import Tool
+from models import Tool
 
 
 # Logger instance for the tools module

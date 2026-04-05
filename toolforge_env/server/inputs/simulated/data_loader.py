@@ -1,6 +1,6 @@
 from typing import Dict, Any, List
 from server.inputs.base import InputProvider
-from server.tasks import Task
+from models import Task
 
 
 class SimulatedDataLoader(InputProvider):

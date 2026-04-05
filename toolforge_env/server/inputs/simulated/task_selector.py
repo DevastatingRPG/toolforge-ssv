@@ -1,3 +1,5 @@
+from server.inputs.simulated.tasks import TASKS_BY_DIFFICULTY
+
 class TaskSelector:
     def __init__(self, mode: str):
         self.mode = mode
@@ -15,7 +17,7 @@ class TaskSelector:
         }
 
     def next_task_list(self, difficulty: str):
-        from server.inputs.simulated.tasks import TASKS_BY_DIFFICULTY
+        
 
         task_lists = TASKS_BY_DIFFICULTY[difficulty]
 
