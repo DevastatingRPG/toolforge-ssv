@@ -42,6 +42,7 @@ STDOUT FORMAT
 """
 
 import asyncio
+import json
 import os
 import textwrap
 from typing import List, Optional
@@ -49,6 +50,7 @@ from typing import List, Optional
 from openai import OpenAI
 
 from toolforge_env import ToolforgeAction, ToolforgeEnv
+from toolforge_env.models import ToolCall
 IMAGE_NAME = os.getenv("IMAGE_NAME") # If you are using docker image 
 API_KEY = os.getenv("HF_TOKEN") or os.getenv("API_KEY")
 
@@ -67,11 +69,11 @@ MAX_TOTAL_REWARD = MAX_STEPS * _MAX_REWARD_PER_STEP
 
 SYSTEM_PROMPT = textwrap.dedent(
     """
-    You are interacting with a simple echo environment.
-    Each turn you must send a message. The environment will echo it back.
-    Reward is proportional to message length: reward = len(message) * 0.1
-    Your goal is to maximize total reward by sending meaningful, substantive messages.
-    Reply with exactly one message string — no quotes, no prefixes, just the message text.
+    You are an agent acting in the Toolforge environment.
+    Produce a valid ToolforgeAction object that matches the provided schema.
+    Build a concise plan using only the tools listed in the prompt.
+    Prefer `action_type="propose_plan"` unless a macro proposal is genuinely helpful.
+    Keep reasoning brief and make every plan step actionable.
     """
 ).strip()
 
@@ -100,33 +102,68 @@ def build_user_prompt(step: int, current_task: str, available_tools: List[str], 
         f"""
         Step: {step}
         Current task: {current_task!r}
-        Available tools: {available_tools}
+        Available tools: {json.dumps(available_tools)}
         Last reward: {last_reward:.2f}
         Previous steps:
         {history_block}
-        Send your next message.
+        Return a ToolforgeAction whose `plan` uses only the available tools.
         """
     ).strip()
 
 
-def get_model_message(client: OpenAI, step: int, current_task: str, available_tools: List[str], last_reward: float, history: List[str]) -> str:
+def build_fallback_action(available_tools: List[str], current_task: str) -> ToolforgeAction:
+    fallback_tool = available_tools[0] if available_tools else "noop"
+    return ToolforgeAction(
+        action_type="propose_plan",
+        plan=[
+            ToolCall(tool_name=fallback_tool, params={"task": current_task}, token_cost=0)
+        ],
+        reasoning="Fallback action because structured model parsing failed.",
+        macro_proposal=None
+    )
+
+
+def get_model_action(
+    client: OpenAI,
+    step: int,
+    current_task: str,
+    available_tools: List[str],
+    last_reward: float,
+    history: List[str],
+) -> ToolforgeAction:
     user_prompt = build_user_prompt(step, current_task, available_tools, last_reward, history)
     try:
+        # completion = client.beta.chat.completions.parse(
+        #     model=MODEL_NAME,
+        #     messages=[
+        #         {"role": "system", "content": SYSTEM_PROMPT},
+        #         {"role": "user", "content": user_prompt},
+        #     ],
+        #     response_format=ToolforgeAction,
+        #     temperature=TEMPERATURE,
+        #     max_tokens=MAX_TOKENS,
+        # )
+        # parsed = completion.choices[0].message.parsed
+        # if parsed is None:
+        #     raise ValueError("Model returned no parsed ToolforgeAction.")
+        # return parsed
+    
         completion = client.chat.completions.create(
             model=MODEL_NAME,
             messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": user_prompt},
+                {"role": "system", "content": SYSTEM_PROMPT + "\nRespond ONLY with valid JSON matching the ToolforgeAction schema. No markdown, no explanation."},
+                {"role": "user", "content": user_prompt + f"\n\nSchema:\n{json.dumps(ToolforgeAction.model_json_schema(), indent=2)}"},
             ],
             temperature=TEMPERATURE,
             max_tokens=MAX_TOKENS,
-            stream=False,
         )
-        text = (completion.choices[0].message.content or "").strip()
-        return text if text else "hello"
+        raw = completion.choices[0].message.content.strip()
+        raw = raw.replace("```json", "").replace("```", "").strip()
+        return ToolforgeAction(**json.loads(raw))
+
     except Exception as exc:
         print(f"[DEBUG] Model request failed: {exc}", flush=True)
-        return "hello"
+        return build_fallback_action(available_tools, current_task)
 
 
 async def main() -> None:
@@ -146,31 +183,37 @@ async def main() -> None:
         result = await env.reset(task=TASK_NAME) # OpenENV.reset()
         obs = result.observation
         task = obs.current_task
-        active_tools = obs.available_tools
-        history = obs.history
+        available_tools = obs.available_tools
+        # history = obs.history
+        history = []
         last_reward = 0.0
 
         for step in range(1, MAX_STEPS + 1):
             if result.done:
                 break
 
-            message = get_model_message(client, step, task.prompt, active_tools, last_reward, history)
+            action = get_model_action(client, step, task.prompt, available_tools, last_reward, history)
 
-            result = await env.step(ToolforgeAction(message=message))
+            result = await env.step(action)
             obs = result.observation
 
             reward = result.reward or 0.0
             done = result.done
-            error = None
+            error = obs.metadata.get("summary") if isinstance(obs.metadata, dict) else None
 
             rewards.append(reward)
             steps_taken = step
-            last_echoed = obs.echoed_message
             last_reward = reward
 
-            log_step(step=step, action=message, reward=reward, done=done, error=error)
+            log_step(
+                step=step,
+                action=action.model_dump_json(),
+                reward=reward,
+                done=done,
+                error=error,
+            )
 
-            history.append(f"Step {step}: {message!r} -> reward {reward:+.2f}")
+            history.append(f"Step {step}: {action.model_dump_json()} -> reward {reward:+.2f}")
 
             if done:
                 break

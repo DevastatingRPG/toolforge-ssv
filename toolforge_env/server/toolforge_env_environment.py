@@ -90,8 +90,7 @@ class ToolforgeEnvironment(Environment):
         self._reset_count = 0
 
         self._input_provider_factory = input_provider_factory
-        self._input_provider = None
-        self._data_generator: Optional[InputProvider] = None
+        self._input_provider: Optional[InputProvider] = None
         self._last_approval: Optional[bool] = None
 
         # persistent config
@@ -317,7 +316,7 @@ class ToolforgeEnvironment(Environment):
         completed_task_id = self._state.current_task.id
         self._state.completed_tasks.append(self._state.current_task)
 
-        if self._data_generator is None or self._data_generator.is_done():
+        if self._input_provider is None or self._input_provider.is_done():
             self._state.done = True
             self._state.task_queue = []
             logger.info(
@@ -518,13 +517,13 @@ class ToolforgeEnvironment(Environment):
     def _sync_task_queue_from_generator(self) -> None:
         """Best-effort sync of remaining tasks for state visibility."""
 
-        if self._data_generator is None:
+        if self._input_provider is None:
             self._state.task_queue = []
             return
 
-        if hasattr(self._data_generator, "data") and hasattr(self._data_generator, "idx"):
-            data = getattr(self._data_generator, "data")
-            idx = getattr(self._data_generator, "idx")
+        if hasattr(self._input_provider, "data") and hasattr(self._input_provider, "idx"):
+            data = getattr(self._input_provider, "data")
+            idx = getattr(self._input_provider, "idx")
             self._state.task_queue = list(data[idx:])
             return
 
