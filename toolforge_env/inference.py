@@ -44,8 +44,9 @@ STDOUT FORMAT
 import asyncio
 import json
 import os
+import pprint
 import textwrap
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 
 from openai import OpenAI
 
@@ -60,7 +61,7 @@ TASK_NAME = os.getenv("MY_ENV_V4_TASK", "echo")
 BENCHMARK = os.getenv("MY_ENV_V4_BENCHMARK", "my_env_v4")
 MAX_STEPS = 8
 TEMPERATURE = 0.7
-MAX_TOKENS = 150
+MAX_TOKENS = 400
 SUCCESS_SCORE_THRESHOLD = 0.1  # normalized score in [0, 1]
 
 # Max possible reward: each token contributes 0.1, across all steps
@@ -127,7 +128,7 @@ def get_model_action(
     client: OpenAI,
     step: int,
     current_task: str,
-    available_tools: List[str],
+    available_tools: List[Dict[str, Any]],
     last_reward: float,
     history: List[str],
 ) -> ToolforgeAction:
