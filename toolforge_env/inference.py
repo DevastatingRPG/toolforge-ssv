@@ -180,7 +180,7 @@ async def main() -> None:
     log_start(task=TASK_NAME, env=BENCHMARK, model=MODEL_NAME)
 
     try:
-        result = await env.reset(task=TASK_NAME) # OpenENV.reset()
+        result = await env.reset(task=TASK_NAME, mode="eval", difficulty="easy") # OpenENV.reset()
         obs = result.observation
         task = obs.current_task
         available_tools = obs.available_tools
