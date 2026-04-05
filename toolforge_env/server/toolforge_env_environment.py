@@ -140,6 +140,27 @@ class ToolforgeEnvironment(Environment):
             available_tools=self._state.available_tools,
         )
 
+    def _tool_to_prompt_spec(self, tool: Tool) -> Dict[str, Any]:
+        """Convert a Tool model into a plain prompt-friendly dictionary."""
+
+        required_params = list(tool.params_schema.get("required", []))
+        properties = tool.params_schema.get("properties", {})
+
+        return {
+            "name": tool.name,
+            "description": tool.description,
+            "is_macro": tool.is_macro,
+            "token_cost": tool.token_cost,
+            "required_params": required_params,
+            "params_schema": properties,
+            "composed_of": tool.composed_of or [],
+        }
+
+    def _available_tools_to_prompt_specs(self, tools: List[Tool]) -> List[Dict[str, Any]]:
+        """Convert available tools to plain dictionaries ready for prompt injection."""
+
+        return [self._tool_to_prompt_spec(tool) for tool in tools]
+
     def reset(        
             self, 
             seed: Optional[int] = None, 
@@ -193,6 +214,9 @@ class ToolforgeEnvironment(Environment):
             "task_prompt": first_task.prompt,
             "task_level": first_task.difficulty,
             "progression": "episode_started",
+            "available_tools_for_prompt": self._available_tools_to_prompt_specs(
+                self._state.available_tools
+            ),
         }
 
         return obs
@@ -214,6 +238,9 @@ class ToolforgeEnvironment(Environment):
             obs_terminal.metadata = {
                 "summary": "Episode already completed.",
                 "terminal": True,
+                "available_tools_for_prompt": self._available_tools_to_prompt_specs(
+                    self._state.available_tools
+                ),
             }
             return obs_terminal
 
@@ -243,6 +270,9 @@ class ToolforgeEnvironment(Environment):
                 "task_prompt": self._state.current_task.prompt,
                 "task_level": self._state.current_task.difficulty,
                 "progression": progression,
+                "available_tools_for_prompt": self._available_tools_to_prompt_specs(
+                    self._state.available_tools
+                ),
             }
             return obs_malformed
 
@@ -308,6 +338,9 @@ class ToolforgeEnvironment(Environment):
                 "token_accounting_source": "tool_registry",
                 "unknown_tool_calls": unknown_tool_calls,
                 "last_approval": self._last_approval,
+                "available_tools_for_prompt": self._available_tools_to_prompt_specs(
+                    self._state.available_tools
+                ),
             },
         )
 
