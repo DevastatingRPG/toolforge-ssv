@@ -9,11 +9,11 @@ from models import Task
 EASY_TASKS = [
     {
         "list_id": "easy-deployment-basic",
-        "description": "Basic deployment and validation tasks",
+        "description": "Basic deployment and validation tasks with repeated workflow hints that can later be abstracted into macros.",
         "tasks": [
             Task(
                 id="easy-deploy-notify",
-                prompt="Deploy the 'frontend-web' service version 'v2.1.0', check its health, and notify the '#deployments' channel that it is done.",
+                prompt="Deploy the 'frontend-web' service version 'v2.1.0', check its health, and notify the '#deployments' channel that it is done. This team usually follows the same deploy, verify, notify rhythm.",
                 difficulty="easy",
                 required_slots=[
                     "deployment_execution",
@@ -24,7 +24,7 @@ EASY_TASKS = [
             ),
             Task(
                 id="easy-deploy-restart",
-                prompt="Deploy 'backend-api' version 'v1.4.2', check its health. It usually needs a restart after deployment, so restart it, check health again, and then notify '#backend-ops' that the deploy is complete.",
+                prompt="Deploy 'backend-api' version 'v1.4.2', check its health. It usually needs a restart after deployment, so restart it, check health again, and then notify '#backend-ops' that the deploy is complete. The verify steps tend to repeat in this workflow.",
                 difficulty="easy",
                 required_slots=[
                     "deployment_execution",
@@ -37,7 +37,7 @@ EASY_TASKS = [
             ),
             Task(
                 id="easy-deploy-scale",
-                prompt="Deploy 'analytics-engine' version 'v3.0.0', then quickly scale it to 10 replicas for the incoming load test. Check health to verify and notify '#data-team'.",
+                prompt="Deploy 'analytics-engine' version 'v3.0.0', then quickly scale it to 10 replicas for the incoming load test. Check health to verify and notify '#data-team'. Operators often reuse the same deploy then verify pattern before the final message.",
                 difficulty="easy",
                 required_slots=[
                     "deployment_execution",
@@ -46,6 +46,85 @@ EASY_TASKS = [
                     "deployment_notification"
                 ],
                 baseline_call_count=4 # deploy, scale, healthcheck, notify
+            ),
+            Task(
+                id="easy-deploy-verify-only",
+                prompt="Deploy 'gateway-core' and confirm it turns healthy. This one stops right after the familiar deploy and verify sequence.",
+                difficulty="easy",
+                required_slots=[
+                    "deployment_execution",
+                    "deployment_verification"
+                ],
+                baseline_call_count=2
+            ),
+            Task(
+                id="easy-deploy-then-notify",
+                prompt="Deploy 'notification-api', verify health, and notify the release channel. The team keeps reusing the same deploy, verify, notify routine.",
+                difficulty="easy",
+                required_slots=[
+                    "deployment_execution",
+                    "deployment_verification",
+                    "deployment_notification"
+                ],
+                baseline_call_count=3
+            ),
+            Task(
+                id="easy-deploy-and-announce",
+                prompt="Deploy 'image-service', check that it is healthy, and announce completion in '#media-ops'. It follows the same familiar release checklist as other services.",
+                difficulty="easy",
+                required_slots=[
+                    "deployment_execution",
+                    "deployment_verification",
+                    "deployment_notification"
+                ],
+                baseline_call_count=3
+            ),
+            Task(
+                id="easy-deploy-restart-notify",
+                prompt="Deploy 'reporting-api', restart it once to pick up the new build, verify health, and notify reporting ops. The deploy and verify pattern appears before the restart branch.",
+                difficulty="easy",
+                required_slots=[
+                    "deployment_execution",
+                    "restart_execution",
+                    "restart_verification",
+                    "deployment_notification"
+                ],
+                baseline_call_count=4
+            ),
+            Task(
+                id="easy-deploy-scale-notify",
+                prompt="Deploy 'catalog-service', scale it up for a launch window, and notify the catalog team once it is ready. The deploy stage often looks the same as earlier tasks.",
+                difficulty="easy",
+                required_slots=[
+                    "deployment_execution",
+                    "scaling_execution",
+                    "deployment_notification"
+                ],
+                baseline_call_count=3
+            ),
+            Task(
+                id="easy-deploy-verify-twice",
+                prompt="Deploy 'session-api', verify it once, restart it for a clean boot, verify again, and notify '#session-ops'. The verification step repeats in this pattern.",
+                difficulty="easy",
+                required_slots=[
+                    "deployment_execution",
+                    "deployment_verification",
+                    "restart_execution",
+                    "restart_verification",
+                    "deployment_notification"
+                ],
+                baseline_call_count=5
+            ),
+            Task(
+                id="easy-deploy-followup-notify",
+                prompt="Deploy 'search-edge', run a healthcheck, and notify '#search-release'. This is another straightforward deploy, verify, notify workflow with the same cadence.",
+                difficulty="easy",
+                required_slots=[
+                    "deployment_execution",
+                    "deployment_verification",
+                    "deployment_notification"
+                ],
+                baseline_call_count=3
             ),
         ]
     },
@@ -387,3 +466,4 @@ TASKS_BY_DIFFICULTY = {
     "medium": MEDIUM_TASKS,
     "hard": HARD_TASKS,
 }
+
