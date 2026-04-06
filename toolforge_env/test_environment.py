@@ -14,21 +14,52 @@ This test executes exactly three explicit steps:
 """
 
 import logging
+from typing import List
 
 from models import MacroProposal, ToolCall, ToolforgeAction
 from server.inputs.factory import create_input_provider
 from server.inputs.simulated.task_selector import TaskSelector
 from server.toolforge_env_environment import ToolforgeEnvironment
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)-7s | %(message)s",
+    datefmt="%H:%M:%S",
+)
 logger = logging.getLogger(__name__)
+
+
+def _banner(title: str) -> None:
+    logger.info("=" * 90)
+    logger.info(title)
+    logger.info("=" * 90)
+
+
+def _log_plan(label: str, plan: List[ToolCall]) -> None:
+    logger.info("%s", label)
+    for idx, call in enumerate(plan, start=1):
+        logger.info(
+            "  %d. tool=%s params=%s token_cost=%d",
+            idx,
+            call.tool_name,
+            call.params,
+            call.token_cost,
+        )
+
+
+def _log_step_result(step_name: str, obs) -> None:
+    logger.info("%s result", step_name)
+    logger.info("  reward=%.3f done=%s", obs.reward, obs.done)
+    logger.info("  summary=%s", obs.metadata.get("summary"))
+    logger.info("  plan_accepted=%s", obs.metadata.get("plan_accepted"))
+    logger.info("  progression=%s", obs.metadata.get("progression"))
+    logger.info("  macro_decision=%s", obs.metadata.get("macro_decision"))
+    logger.info("  macro_reason=%s", obs.metadata.get("macro_reason"))
 
 
 def test_environment_three_step_macro_flow() -> None:
     """Run three explicit steps to validate macro proposal and usage behavior."""
-    logger.info("=" * 80)
-    logger.info("TEST: Three-Step Macro Flow")
-    logger.info("=" * 80)
+    _banner("TEST: Three-Step Macro Flow")
 
     task_selector = TaskSelector(mode="eval")
     env = ToolforgeEnvironment(
@@ -43,10 +74,15 @@ def test_environment_three_step_macro_flow() -> None:
         seed=42,
     )
 
-    logger.info("Reset successful: task=%s done=%s", obs.current_task.id, obs.done)
+    logger.info("Reset successful")
+    logger.info("  episode_id=%s", env.state.episode_id)
+    logger.info("  current_task=%s", obs.current_task.id)
+    logger.info("  task_prompt=%s", obs.current_task.prompt)
+    logger.info("  required_slots=%s", obs.current_task.required_slots)
+    logger.info("  done=%s", obs.done)
     assert not obs.done, "Episode should not be done right after reset"
 
-    logger.info("\n--- Step 1: Propose valid macro ---")
+    _banner("Step 1: Propose valid macro (should clear validation + slot stage)")
     macro_steps = [
         ToolCall(
             tool_name="deploy",
@@ -58,53 +94,84 @@ def test_environment_three_step_macro_flow() -> None:
             params={"service_name": "frontend-web"},
             token_cost=2,
         ),
+        ToolCall(
+            tool_name="notify",
+            params={"channel": "#deployments", "message": "frontend-web deployed"},
+            token_cost=1,
+        ),
     ]
+    _log_plan("Step 1 plan", macro_steps)
+
     action_step_1 = ToolforgeAction(
         action_type="propose_plan_with_macro",
         plan=macro_steps,
         macro_proposal=MacroProposal(
             name="deploy_and_verify_macro",
-            description="Deploy then healthcheck",
-            steps=macro_steps,
+            description="Deploy, healthcheck, and notify",
+            steps=[macro_steps[0], macro_steps[1]],
         ),
         reasoning="Propose reusable macro for deployment verification.",
     )
 
     obs = env.step(action_step_1)
-    logger.info("Step 1 obs=%s", obs)
-    logger.info("Step 1 reward=%.3f done=%s", obs.reward, obs.done)
-    logger.info("Step 1 macro_decision=%s", obs.metadata.get("macro_decision"))
+    _log_step_result("Step 1", obs)
     assert obs.metadata.get("macro_decision") == "approved", "Expected valid macro approval"
+    assert obs.metadata.get("plan_accepted") is True, "Step 1 should pass validation"
 
-    logger.info("\n--- Step 2: Use approved macro ---")
+    _banner("Step 2: Use approved macro (should clear validation + slot stage)")
+    step_2_plan = [
+        ToolCall(
+            tool_name="deploy_and_verify_macro",
+            params={},
+            token_cost=10,
+        ),
+        ToolCall(
+            tool_name="restart",
+            params={"service_name": "backend-api"},
+            token_cost=8,
+        ),
+        ToolCall(
+            tool_name="healthcheck",
+            params={"service_name": "backend-api"},
+            token_cost=2,
+        ),
+        ToolCall(
+            tool_name="notify",
+            params={"channel": "#backend-ops", "message": "deployment complete"},
+            token_cost=1,
+        ),
+        ToolCall(
+            tool_name="healthcheck",
+            params={"service_name": "backend-api"},
+            token_cost=2,
+        ),
+    ]
+    _log_plan("Step 2 plan", step_2_plan)
+
     action_step_2 = ToolforgeAction(
         action_type="propose_plan",
-        plan=[
-            ToolCall(
-                tool_name="deploy_and_verify_macro",
-                params={},
-                token_cost=10,
-            )
-        ],
+        plan=step_2_plan,
         macro_proposal=None,
         reasoning="Use approved macro in the next plan.",
     )
 
     obs = env.step(action_step_2)
-    logger.info("Step 2 reward=%.3f done=%s", obs.reward, obs.done)
-    logger.info("Step 2 plan_accepted=%s", obs.metadata.get("plan_accepted"))
+    _log_step_result("Step 2", obs)
     assert obs.metadata.get("plan_accepted") is True, "Expected macro usage plan to pass validation"
 
-    logger.info("\n--- Step 3: Propose invalid macro with wrong_tool ---")
+    _banner("Step 3: Propose invalid macro with wrong_tool")
+    step_3_plan = [
+        ToolCall(
+            tool_name="deploy",
+            params={"service_name": "backend-api", "version": "v1.4.2"},
+            token_cost=10,
+        )
+    ]
+    _log_plan("Step 3 plan", step_3_plan)
+
     action_step_3 = ToolforgeAction(
         action_type="propose_plan_with_macro",
-        plan=[
-            ToolCall(
-                tool_name="deploy",
-                params={"service_name": "backend-api", "version": "v1.4.2"},
-                token_cost=10,
-            )
-        ],
+        plan=step_3_plan,
         macro_proposal=MacroProposal(
             name="invalid_macro",
             description="Contains unknown tool and should be rejected",
@@ -125,12 +192,10 @@ def test_environment_three_step_macro_flow() -> None:
     )
 
     obs = env.step(action_step_3)
-    logger.info("Step 3 reward=%.3f done=%s", obs.reward, obs.done)
-    logger.info("Step 3 macro_decision=%s", obs.metadata.get("macro_decision"))
-    logger.info("Step 3 macro_reason=%s", obs.metadata.get("macro_reason"))
+    _log_step_result("Step 3", obs)
     assert obs.metadata.get("macro_decision") == "rejected", "Expected invalid macro rejection"
 
-    logger.info("\nSummary")
+    _banner("Summary")
     logger.info("Final step_count=%d", env.state.step_count)
     logger.info("Accepted macros=%d", len(env.state.accepted_macros))
     logger.info("Rejected macros=%d", env.state.rejected_macro_count)

@@ -94,7 +94,7 @@ def test_environment_reset_and_step():
         logger.info(f"Current Task ID: {current_task_id}")
         
         # Get tool names from available tools
-        available_tool_names = [tool["name"] for tool in obs.available_tools]
+        available_tool_names = [tool.name for tool in obs.available_tools]
         logger.info(f"Available Tools: {available_tool_names}")
         
         # Create a sample action: deploy service with healthcheck and notify
