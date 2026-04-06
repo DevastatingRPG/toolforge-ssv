@@ -12,21 +12,20 @@ The toolforge_env environment is a simple test environment that echoes back mess
 
 from openenv.core.env_server.types import Action, Observation, State
 from typing import Any, Dict, List, Literal, Optional, Tuple
-from pydantic import Field, BaseModel, model_validator
+from pydantic import Field, BaseModel, ConfigDict, model_validator
 
 class ToolCall(BaseModel):
     """
     Represents a single invocation of a tool.
-    It encapsulates the tool's identity, the arguments provided, and the cost in tokens.
+    It encapsulates the tool's identity and the arguments provided.
     """
+    model_config = ConfigDict(extra="forbid")
+
     # Name of the tool being called
     tool_name: str
     
     # Parameters passed to the tool
     params: Dict[str, Any]
-    
-    # Token cost of calling this tool
-    token_cost: int
 
 
 class Tool(BaseModel):

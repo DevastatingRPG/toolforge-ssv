@@ -117,7 +117,7 @@ def build_fallback_action(available_tools: List[str], current_task: str) -> Tool
     return ToolforgeAction(
         action_type="propose_plan",
         plan=[
-            ToolCall(tool_name=fallback_tool, params={"task": current_task}, token_cost=0)
+            ToolCall(tool_name=fallback_tool, params={"task": current_task})
         ],
         reasoning="Fallback action because structured model parsing failed.",
         macro_proposal=None

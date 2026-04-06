@@ -14,15 +14,49 @@ Tests the full episode lifecycle:
 4. Verify state progression and episode termination
 """
 
+from datetime import datetime
 import logging
+from pathlib import Path
+
 from server.toolforge_env_environment import ToolforgeEnvironment
 from server.inputs.factory import create_input_provider
 from server.inputs.simulated.task_selector import TaskSelector
-from server.tools import build_atomic_tools
 from models import ToolforgeAction, ToolCall
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+
+def configure_logging() -> Path:
+    """Configure console + timestamped file logging under test/ directory."""
+
+    log_dir = Path(__file__).parent / "test"
+    log_dir.mkdir(parents=True, exist_ok=True)
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    log_file_path = log_dir / f"test_environment_{timestamp}.log"
+
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.INFO)
+    root_logger.handlers.clear()
+
+    formatter = logging.Formatter(
+        "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
+        "%Y-%m-%d %H:%M:%S",
+    )
+
+    file_handler = logging.FileHandler(log_file_path, encoding="utf-8")
+    file_handler.setLevel(logging.INFO)
+    file_handler.setFormatter(formatter)
+
+    stream_handler = logging.StreamHandler()
+    stream_handler.setLevel(logging.INFO)
+    stream_handler.setFormatter(formatter)
+
+    root_logger.addHandler(file_handler)
+    root_logger.addHandler(stream_handler)
+
+    logger.info("Logging initialized. Log file: %s", log_file_path)
+    return log_file_path
 
 
 def test_environment_reset_and_step():
@@ -44,11 +78,12 @@ def test_environment_reset_and_step():
     # 1. Initialize environment with task provider factory
     # ───────────────────────────────────────────────────────────────────────
     task_selector = TaskSelector(mode="eval")
+    logger.info(f"Task selector created successfully: {task_selector}")
     env = ToolforgeEnvironment(
         task_selector=task_selector,
         input_provider_factory=create_input_provider
     )
-    logger.info("✓ Environment created successfully")
+    logger.info(f"✓ Environment created successfully: {env}")
 
     # ───────────────────────────────────────────────────────────────────────
     # 2. Reset environment in eval mode with easy difficulty
@@ -64,11 +99,11 @@ def test_environment_reset_and_step():
     logger.info(f"✓ Reset successful")
     logger.info(f"  Episode ID: {env.state.episode_id}")
     logger.info(f"  Initial Task: {obs.current_task.id}")
-    logger.info(f"  Task Prompt: {obs.current_task.prompt[:60]}...")
+    logger.info(f"  Task Prompt: {obs.current_task.prompt}")
     logger.info(f"  Task Difficulty: {obs.current_task.difficulty}")
     logger.info(f"  Required Slots: {obs.current_task.required_slots}")
     logger.info(f"  Baseline Call Count: {obs.current_task.baseline_call_count}")
-    logger.info(f"  Available Tools: {len(obs.available_tools)}")
+    logger.info(f"  Available Tools: {obs.available_tools}")
     logger.info(f"  Done: {obs.done}")
     logger.info(f"  Reward: {obs.reward}")
     
@@ -250,7 +285,9 @@ if __name__ == "__main__":
     # ───────────────────────────────────────────────────────────────────────
     # Run all tests
     # ───────────────────────────────────────────────────────────────────────
+    log_path = configure_logging()
     try:
+        logger.info("Starting tests. Output log: %s", log_path)
         test_environment_reset_and_step()
         test_environment_multiple_tasks_easy()
         

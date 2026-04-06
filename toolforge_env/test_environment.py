@@ -39,11 +39,10 @@ def _log_plan(label: str, plan: List[ToolCall]) -> None:
     logger.info("%s", label)
     for idx, call in enumerate(plan, start=1):
         logger.info(
-            "  %d. tool=%s params=%s token_cost=%d",
+            "  %d. tool=%s params=%s",
             idx,
             call.tool_name,
             call.params,
-            call.token_cost,
         )
 
 
@@ -87,17 +86,14 @@ def test_environment_three_step_macro_flow() -> None:
         ToolCall(
             tool_name="deploy",
             params={"service_name": "frontend-web", "version": "v2.1.0"},
-            token_cost=10,
         ),
         ToolCall(
             tool_name="healthcheck",
             params={"service_name": "frontend-web"},
-            token_cost=2,
         ),
         ToolCall(
             tool_name="notify",
             params={"channel": "#deployments", "message": "frontend-web deployed"},
-            token_cost=1,
         ),
     ]
     _log_plan("Step 1 plan", macro_steps)
@@ -123,27 +119,22 @@ def test_environment_three_step_macro_flow() -> None:
         ToolCall(
             tool_name="deploy_and_verify_macro",
             params={},
-            token_cost=10,
         ),
         ToolCall(
             tool_name="restart",
             params={"service_name": "backend-api"},
-            token_cost=8,
         ),
         ToolCall(
             tool_name="healthcheck",
             params={"service_name": "backend-api"},
-            token_cost=2,
         ),
         ToolCall(
             tool_name="notify",
             params={"channel": "#backend-ops", "message": "deployment complete"},
-            token_cost=1,
         ),
         ToolCall(
             tool_name="healthcheck",
             params={"service_name": "backend-api"},
-            token_cost=2,
         ),
     ]
     _log_plan("Step 2 plan", step_2_plan)
@@ -164,7 +155,6 @@ def test_environment_three_step_macro_flow() -> None:
         ToolCall(
             tool_name="deploy",
             params={"service_name": "backend-api", "version": "v1.4.2"},
-            token_cost=10,
         )
     ]
     _log_plan("Step 3 plan", step_3_plan)
@@ -179,12 +169,10 @@ def test_environment_three_step_macro_flow() -> None:
                 ToolCall(
                     tool_name="deploy",
                     params={"service_name": "backend-api", "version": "v1.4.2"},
-                    token_cost=10,
                 ),
                 ToolCall(
                     tool_name="wrong_tool",
                     params={},
-                    token_cost=10,
                 ),
             ],
         ),
