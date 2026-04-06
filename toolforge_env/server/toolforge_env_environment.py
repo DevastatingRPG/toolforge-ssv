@@ -142,17 +142,12 @@ class ToolforgeEnvironment(Environment):
     def _tool_to_prompt_spec(self, tool: Tool) -> Dict[str, Any]:
         """Convert a Tool model into a plain prompt-friendly dictionary."""
 
-        required_params = list(tool.params_schema.get("required", []))
-        properties = tool.params_schema.get("properties", {})
-
         return {
             "name": tool.name,
             "description": tool.description,
             "is_macro": tool.is_macro,
             "token_cost": tool.token_cost,
-            "required_params": required_params,
-            "params_schema": properties,
-            "composed_of": tool.composed_of or [],
+            "steps": tool.steps or [],
         }
 
     def _available_tools_to_prompt_specs(self, tools: List[Tool]) -> List[Dict[str, Any]]:
@@ -350,8 +345,6 @@ class ToolforgeEnvironment(Environment):
 
         if self._input_provider is None or self._input_provider.is_done():
             self._state.done = True
-            print("SHIT DONE", self._input_provider.is_done())
-            print(self._input_provider.tasks)
             self._state.task_queue = []
             logger.info(
                 "Episode complete. Final task '%s' finished; no tasks remain.",
@@ -449,6 +442,14 @@ class ToolforgeEnvironment(Environment):
                 reason="macro_name_cannot_be_empty",
             )
 
+        if not proposal.steps:
+            return self._reject_macro(
+                result=result,
+                name=None,
+                reason="macro_steps_cannot_be_empty",
+            )
+
+
         existing_names = {tool.name for tool in self._state.available_tools}
         if macro_name in existing_names:
             return self._reject_macro(
@@ -501,14 +502,8 @@ class ToolforgeEnvironment(Environment):
         macro_tool = Tool(
             name=macro_name,
             description=proposal.description.strip() or f"Macro: {' -> '.join(composed_of)}",
-            params_schema={
-                "type": "object",
-                "properties": {},
-                "required": [],
-            },
             is_macro=True,
             token_cost=macro_token_cost,
-            composed_of=composed_of,
         )
 
         self._state.accepted_macros.append(macro_tool)
