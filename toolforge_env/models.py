@@ -131,7 +131,7 @@ class ToolforgeObservation(Observation):
     )
 
     # List of tools currently available to the agent
-    available_tools: List[Tool] = Field(
+    available_tools: List[Dict[str, Any]] = Field(
         ..., description="List of tools currently available to the agent"
     )
 

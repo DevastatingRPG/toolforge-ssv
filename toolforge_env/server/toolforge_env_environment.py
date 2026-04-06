@@ -143,7 +143,7 @@ class ToolforgeEnvironment(Environment):
         """
         return ToolforgeObservation(
             current_task=self._state.current_task,
-            available_tools=self._state.available_tools,
+            available_tools=self._available_tools_to_prompt_specs(self._state.available_tools),
         )
 
     def _tool_to_prompt_spec(self, tool: Tool) -> Dict[str, Any]:
@@ -326,7 +326,7 @@ class ToolforgeEnvironment(Environment):
 
         return ToolforgeObservation(
             current_task=self._state.current_task,
-            available_tools=self._state.available_tools,
+            available_tools=self._available_tools_to_prompt_specs(self._state.available_tools),
             done=self._is_done(),
             reward=reward,
             metadata={

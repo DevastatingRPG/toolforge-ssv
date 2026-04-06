@@ -324,11 +324,11 @@ def run_token_calculation(
     available_tools: Dict[str, Tool],
     sequence_counts: Optional[Dict[str, int]] = None,
     macro_definitions: Optional[Dict[str, List[str]]] = None,
-    macro_proposal: Optional[MacroProposal] = None,
+    macro_proposal: Optional[Tool] = None,
 ) -> TokenCostResult:
     """Stage 4: Compute a token-efficiency score and macro savings for a plan."""
     baseline_tokens = calculate_dynamic_baseline_tokens(task, available_tools)
-    tokens_used = sum(call.token_cost for call in plan)
+    tokens_used = sum(0 for call in plan)
     
     if baseline_tokens <= 0:
         efficiency_ratio = 0.0
@@ -343,7 +343,7 @@ def run_token_calculation(
     
     # Macro recognition bonus: reward creating a macro for a previously-seen sequence
     macro_recognition_bonus = 0.0
-    if macro_proposal is not None and sequence_counts is not None:
+    if macro_proposal is not None and sequence_counts is not None and macro_proposal.steps is not None:
         proposed_sequence = tuple(call.tool_name for call in macro_proposal.steps)
         prior_count = count_prior_sequence_occurrences(proposed_sequence, sequence_counts)
         macro_recognition_bonus = calculate_macro_recognition_bonus(
@@ -385,8 +385,8 @@ def run_token_calculation(
         efficiency_ratio=efficiency_ratio,
         efficiency_score=efficiency_score,
         macro_savings=macro_savings,
-        # macro_recognition_bonus=macro_recognition_bonus,
-        # macro_utility_bonus=macro_utility_bonus,
+        macro_recognition_bonus=macro_recognition_bonus,
+        macro_utility_bonus=macro_utility_bonus,
         macro_bonus=macro_bonus
     )
 
