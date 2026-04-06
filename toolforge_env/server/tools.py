@@ -27,14 +27,6 @@ def build_atomic_tools() -> List[Tool]:
     tool_deploy = Tool(
         name="deploy",
         description="Deploys a specified service or application version to a target environment.",
-        params_schema={
-            "type": "object",
-            "properties": {
-                "service_name": {"type": "string", "description": "Name of the service to deploy"},
-                "version": {"type": "string", "description": "Version tag or commit hash"},
-            },
-            "required": ["service_name", "version"]
-        },
         token_cost=10
     )
     
@@ -47,13 +39,6 @@ def build_atomic_tools() -> List[Tool]:
     tool_healthcheck = Tool(
         name="healthcheck",
         description="Checks the current health status of a running service.",
-        params_schema={
-            "type": "object",
-            "properties": {
-                "service_name": {"type": "string", "description": "Name of the service to check"},
-            },
-            "required": ["service_name"]
-        },
         token_cost=2
     )
 
@@ -66,14 +51,6 @@ def build_atomic_tools() -> List[Tool]:
     tool_notify = Tool(
         name="notify",
         description="Sends a notification to a specific channel (e.g., Slack, Email) regarding system status.",
-        params_schema={
-            "type": "object",
-            "properties": {
-                "channel": {"type": "string", "description": "Target communication channel"},
-                "message": {"type": "string", "description": "The message body to send"},
-            },
-            "required": ["channel", "message"]
-        },
         token_cost=1
     )
 
@@ -86,13 +63,6 @@ def build_atomic_tools() -> List[Tool]:
     tool_rollback = Tool(
         name="rollback",
         description="Reverts a deployed service to the previous stable version if something goes wrong.",
-        params_schema={
-            "type": "object",
-            "properties": {
-                "service_name": {"type": "string", "description": "Name of the service to rollback"},
-            },
-            "required": ["service_name"]
-        },
         token_cost=15
     )
 
@@ -105,14 +75,6 @@ def build_atomic_tools() -> List[Tool]:
     tool_scale = Tool(
         name="scale",
         description="Adjusts the number of running replicas for a given service.",
-        params_schema={
-            "type": "object",
-            "properties": {
-                "service_name": {"type": "string", "description": "Name of the service to scale"},
-                "replicas": {"type": "integer", "description": "Desired number of running instances"},
-            },
-            "required": ["service_name", "replicas"]
-        },
         token_cost=5
     )
 
@@ -125,13 +87,6 @@ def build_atomic_tools() -> List[Tool]:
     tool_restart = Tool(
         name="restart",
         description="Performs a rolling restart on a specified service.",
-        params_schema={
-            "type": "object",
-            "properties": {
-                "service_name": {"type": "string", "description": "Name of the service to restart"},
-            },
-            "required": ["service_name"]
-        },
         token_cost=8
     )
 

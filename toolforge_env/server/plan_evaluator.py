@@ -55,7 +55,7 @@ def _build_judge_request(
         "required_slots": required_slots,
         "slot_definitions": slot_definitions,
         "tools": [t.name for t in available_tools],
-        "plan": [{"tool": c.tool_name, "params": c.params} for c in plan]
+        "plan": [{"tool": c.tool_name} for c in plan]
     }
 
 def _simulate_llm_judgment(
@@ -158,20 +158,6 @@ def run_sanity_validation(
         if call.tool_name not in available_tools:
             return ValidationResult(valid=False, reason="INVALID_TOOL", penalty=-0.8, detail=f"Tool '{call.tool_name}' does not exist in toolbox.")
 
-    for call in plan:
-        tool = available_tools[call.tool_name]
-        allowed_params = set(tool.params_schema.get("properties", {}).keys())
-        required_params = set(tool.params_schema.get("required", []))
-        provided_params = set(call.params.keys())
-
-        missing = required_params - provided_params
-        if missing:
-            return ValidationResult(valid=False, reason="MISSING_PARAM", penalty=-0.6, detail=f"Tool '{call.tool_name}' is missing required parameter(s): {sorted(missing)}.")
-
-        extra = provided_params - allowed_params
-        if extra:
-            return ValidationResult(valid=False, reason="EXTRA_PARAM", penalty=-0.3, detail=f"Tool '{call.tool_name}' received unexpected parameter(s): {sorted(extra)}.")
-
     return ValidationResult(valid=True, reason="VALID", penalty=0.0)
 
 def run_slot_judgment(
@@ -256,9 +242,9 @@ def run_token_calculation(
         efficiency_ratio=efficiency_ratio,
         efficiency_score=efficiency_score,
         macro_savings=macro_savings,
-        macro_recognition_bonus=macro_recognition_bonus,
-        macro_utility_bonus=macro_utility_bonus,
-        macro_bonus=macro_bonus,
+        # macro_recognition_bonus=macro_recognition_bonus,
+        # macro_utility_bonus=macro_utility_bonus,
+        macro_bonus=macro_bonus
     )
 
 def reward_calculation(
