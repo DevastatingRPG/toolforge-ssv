@@ -47,15 +47,15 @@ except ImportError:
     )
 
 try:
+    from server.tools import build_atomic_tools
+    from server.evaluation_pipeline import run_evaluation_pipeline
+    from server.inputs.simulated.data_loader import SimulatedDataLoader
+    from server.plan_evaluator import update_sequence_counts
+except ImportError:
     from .tools import build_atomic_tools
     from .evaluation_pipeline import run_evaluation_pipeline
     from .inputs.simulated.data_loader import SimulatedDataLoader
     from .plan_evaluator import update_sequence_counts
-except ImportError:
-    from tools import build_atomic_tools
-    from evaluation_pipeline import run_evaluation_pipeline
-    from inputs.simulated.data_loader import SimulatedDataLoader
-    from plan_evaluator import update_sequence_counts
 
 
 logger = logging.getLogger(__name__)
