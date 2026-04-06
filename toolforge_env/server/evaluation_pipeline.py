@@ -13,9 +13,9 @@ Pipeline flow:
 Short-circuits if validation fails, or if harmful calls are present.
 """
 
-from typing import Dict, List
+from typing import Dict, List, Optional
 
-from toolforge_env.models import PipelineResult, Task, Tool, ToolCall
+from toolforge_env.models import MacroProposal, PipelineResult, Task, Tool, ToolCall
 from toolforge_env.server.plan_evaluator import (
     get_relevant_slots,
     plan_accuracy_score,
@@ -30,7 +30,12 @@ def run_evaluation_pipeline(
     plan: List[ToolCall],
     task: Task,
     available_tools: Dict[str, Tool],
-    accepted_macros: List[Tool]
+    accepted_macros: List[Tool],
+    baseline_token_cost: int,
+    goal_achieved: bool = False,
+    sequence_counts: Optional[Dict[str, int]] = None,
+    macro_definitions: Optional[Dict[str, List[str]]] = None,
+    macro_proposal: Optional[MacroProposal] = None,
 ) -> PipelineResult:
     """Run the evaluation pipeline on a proposed plan."""
     
@@ -75,15 +80,18 @@ def run_evaluation_pipeline(
         validation_result=validation,
         slot_judgment=slot_judgment,
         task=task,
-        goal_achieved=False,
+        goal_achieved=goal_achieved,
     )
 
     # 4. run_token_calculation(...)
     token_cost = run_token_calculation(
         plan=plan,
+        accepted_macros=accepted_macros,
         task=task,
         available_tools=available_tools,
-        accepted_macros=accepted_macros,
+        sequence_counts=sequence_counts,
+        macro_definitions=macro_definitions,
+        macro_proposal=macro_proposal,
     )
 
     # 5. reward_calculation(...)

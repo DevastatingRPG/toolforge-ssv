@@ -11,8 +11,8 @@ The toolforge_env environment is a simple test environment that echoes back mess
 """
 
 from openenv.core.env_server.types import Action, Observation, State
-from typing import Any, Dict, List, Literal, Optional
-from pydantic import Field, BaseModel
+from typing import Any, Dict, List, Literal, Optional, Tuple
+from pydantic import Field, BaseModel, model_validator
 
 class ToolCall(BaseModel):
     """
@@ -48,8 +48,7 @@ class Tool(BaseModel):
 class Task(BaseModel):
     """
     Represents a DevOps task that the agent needs to accomplish.
-    Contains the prompt, difficulty, expected steps, semantic slots,
-    and baseline token cost for grading.
+    Contains the prompt, difficulty, semantic slots, and baseline cost metadata.
     """
     # Unique identifier for the task
     id: str
@@ -60,11 +59,31 @@ class Task(BaseModel):
     # The difficulty level of the task
     difficulty: Literal["easy", "medium", "hard"]
 
-    # Semantic slot names the judge checks against (e.g. deployment_execution)
+    # Semantic slot names the judge checks against (e.g. DEPLOYMENT_ACTION)
     required_slots: List[str]
 
-    # The baseline number of tool calls minimally needed for a correct atomic solution
-    baseline_call_count: int
+    # Naive token cost of executing the task's intended atomic sequence
+    baseline_token_cost: int = 0
+
+    # Backward-compatible field used by task fixtures in this repository
+    baseline_call_count: int = 0
+
+    @model_validator(mode="before")
+    @classmethod
+    def _sync_baseline_fields(cls, data: Any) -> Any:
+        """Allow either baseline_call_count or baseline_token_cost in task payloads."""
+        if not isinstance(data, dict):
+            return data
+
+        has_token_cost = "baseline_token_cost" in data
+        has_call_count = "baseline_call_count" in data
+
+        if has_call_count and not has_token_cost:
+            data["baseline_token_cost"] = data["baseline_call_count"]
+        elif has_token_cost and not has_call_count:
+            data["baseline_call_count"] = data["baseline_token_cost"]
+
+        return data
 
 
 
@@ -112,7 +131,7 @@ class ToolforgeObservation(Observation):
     )
 
     # List of tools currently available to the agent
-    available_tools: List[Dict[str, Any]] = Field(
+    available_tools: List[Tool] = Field(
         ..., description="List of tools currently available to the agent"
     )
 
@@ -149,6 +168,15 @@ class ToolForgeState(State):
     
     # Flag indicating if the environment episode has concluded
     done: bool
+
+    # Exact ordered contiguous sequence counts observed earlier in the episode
+    sequence_counts: Dict[str, int] = Field(default_factory=dict)
+
+    # Number of times each macro tool has been used
+    macro_usage_counts: Dict[str, int] = Field(default_factory=dict)
+
+    # Macro name -> ordered atomic tool names it represents
+    macro_definitions: Dict[str, List[str]] = Field(default_factory=dict)
 
 
 class PlanAccuracyResult(BaseModel):
@@ -218,7 +246,11 @@ class TokenCostResult(BaseModel):
     efficiency_score: float
     # Tokens saved through macro reuse
     macro_savings: int
-    # Bonus points applied when a macro is used efficiently
+    # Bonus for recognizing a repeated sequence at or above threshold
+    macro_recognition_bonus: float
+    # Bonus for macro actually saving tokens vs atomic equivalent
+    macro_utility_bonus: float
+    # Combined macro bonus (recognition + utility)
     macro_bonus: float
 
 class ValidationResult(BaseModel):

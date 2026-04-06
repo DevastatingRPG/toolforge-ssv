@@ -16,21 +16,16 @@ from uuid import uuid4
 
 from openenv.core.env_server.interfaces import Environment
 from openenv.core.env_server.types import EnvironmentMetadata, State
-from server.inputs.base import InputProvider
 from typing import Any, Dict, List, Optional
-from server.inputs.simulated.task_selector import TaskSelector
 
 try:
-    from models import (
-        Tool,
-        ToolCall,
-        ToolforgeAction,
-        ToolforgeObservation,
-        ToolForgeState,
-        Task,
-        ValidationResult
-    )
+    from .inputs.base import InputProvider
+    from .inputs.simulated.task_selector import TaskSelector
 except ImportError:
+    from server.inputs.base import InputProvider
+    from server.inputs.simulated.task_selector import TaskSelector
+
+try:
     from ..models import (
         Tool,
         ToolCall,
@@ -40,13 +35,27 @@ except ImportError:
         Task,
         ValidationResult
     )
+except ImportError:
+    from models import (
+        Tool,
+        ToolCall,
+        ToolforgeAction,
+        ToolforgeObservation,
+        ToolForgeState,
+        Task,
+        ValidationResult
+    )
 
 try:
-    from server.tools import build_atomic_tools
-    from server.evaluation_pipeline import run_evaluation_pipeline
-except ImportError:
     from .tools import build_atomic_tools
     from .evaluation_pipeline import run_evaluation_pipeline
+    from .inputs.simulated.data_loader import SimulatedDataLoader
+    from .plan_evaluator import update_sequence_counts
+except ImportError:
+    from tools import build_atomic_tools
+    from evaluation_pipeline import run_evaluation_pipeline
+    from inputs.simulated.data_loader import SimulatedDataLoader
+    from plan_evaluator import update_sequence_counts
 
 
 logger = logging.getLogger(__name__)
@@ -88,7 +97,7 @@ class ToolforgeEnvironment(Environment):
         self._reset_count = 0
 
         self._input_provider_factory = input_provider_factory
-        self._input_provider: Optional[InputProvider] = None
+        self._input_provider = None
         self._last_approval: Optional[bool] = None
 
         # persistent config
@@ -108,7 +117,7 @@ class ToolforgeEnvironment(Environment):
             prompt="Default task",
             difficulty="easy",
             required_slots=[],
-            baseline_call_count=0,
+            baseline_token_cost=0,
         )
 
         return ToolForgeState(
@@ -134,9 +143,7 @@ class ToolforgeEnvironment(Environment):
         """
         return ToolforgeObservation(
             current_task=self._state.current_task,
-            available_tools=self._available_tools_to_prompt_specs(
-                    self._state.available_tools
-            )
+            available_tools=self._state.available_tools,
         )
 
     def _tool_to_prompt_spec(self, tool: Tool) -> Dict[str, Any]:
@@ -197,6 +204,10 @@ class ToolforgeEnvironment(Environment):
         self._state.call_history = []
         self._state.tokens_used = 0
         self._state.done = False
+        # Reset episode-level macro tracking state
+        self._state.sequence_counts = {}
+        self._state.macro_usage_counts = {}
+        self._state.macro_definitions = {}
         self._last_approval = None
 
 
@@ -208,9 +219,6 @@ class ToolforgeEnvironment(Environment):
             "task_prompt": first_task.prompt,
             "task_level": first_task.difficulty,
             "progression": "episode_started",
-            "available_tools_for_prompt": self._available_tools_to_prompt_specs(
-                self._state.available_tools
-            ),
         }
 
         return obs
@@ -232,9 +240,6 @@ class ToolforgeEnvironment(Environment):
             obs_terminal.metadata = {
                 "summary": "Episode already completed.",
                 "terminal": True,
-                "available_tools_for_prompt": self._available_tools_to_prompt_specs(
-                    self._state.available_tools
-                ),
             }
             return obs_terminal
 
@@ -264,9 +269,6 @@ class ToolforgeEnvironment(Environment):
                 "task_prompt": self._state.current_task.prompt,
                 "task_level": self._state.current_task.difficulty,
                 "progression": progression,
-                "available_tools_for_prompt": self._available_tools_to_prompt_specs(
-                    self._state.available_tools
-                ),
             }
             return obs_malformed
 
@@ -287,8 +289,23 @@ class ToolforgeEnvironment(Environment):
             task=self._state.current_task,
             available_tools=available_tools_by_name,
             accepted_macros=self._state.accepted_macros,
+            baseline_token_cost=self._state.current_task.baseline_token_cost,
+            sequence_counts=self._state.sequence_counts,
+            macro_definitions=self._state.macro_definitions,
+            macro_proposal=action.macro_proposal,
         )
         self._last_approval = bool(pipeline_result.passed_validation)
+
+        # Update sequence counts AFTER pipeline evaluation so recognition uses prior counts only
+        update_sequence_counts(action.plan, self._state.sequence_counts)
+
+        # Update macro usage counts for any macro tools used in this plan
+        macro_names = {m.name for m in self._state.accepted_macros}
+        for call in action.plan:
+            if call.tool_name in macro_names:
+                self._state.macro_usage_counts[call.tool_name] = (
+                    self._state.macro_usage_counts.get(call.tool_name, 0) + 1
+                )
 
         progression = "advanced_to_next_task"
         if self._state.step_count >= self.MAX_EPISODE_STEPS:
@@ -309,9 +326,7 @@ class ToolforgeEnvironment(Environment):
 
         return ToolforgeObservation(
             current_task=self._state.current_task,
-            available_tools=self._available_tools_to_prompt_specs(
-                self._state.available_tools
-            ),
+            available_tools=self._state.available_tools,
             done=self._is_done(),
             reward=reward,
             metadata={
@@ -331,9 +346,6 @@ class ToolforgeEnvironment(Environment):
                 "token_accounting_source": "tool_registry",
                 "unknown_tool_calls": unknown_tool_calls,
                 "last_approval": self._last_approval,
-                "available_tools_for_prompt": self._available_tools_to_prompt_specs(
-                    self._state.available_tools
-                ),
             },
         )
 
@@ -509,6 +521,9 @@ class ToolforgeEnvironment(Environment):
         self._state.accepted_macros.append(macro_tool)
         self._state.available_tools.append(macro_tool)
 
+        # Store macro definition for sequence-based recognition tracking
+        self._state.macro_definitions[macro_name] = composed_of
+
         result["decision"] = "approved"
         result["name"] = macro_name
         result["reason"] = f"macro_registered_token_cost:{macro_token_cost}"
@@ -540,10 +555,8 @@ class ToolforgeEnvironment(Environment):
 
         if self._input_provider is None:
             raise RuntimeError("Task data generator not initialized. Call reset() first.")
-        task = self._input_provider.get_input()
-        print(f"Fetched next task from input provider: {task.id}")
-        print(task)
-        return task
+
+        return self._input_provider.get_input()
 
     def _sync_task_queue_from_generator(self) -> None:
         """Best-effort sync of remaining tasks for state visibility."""
