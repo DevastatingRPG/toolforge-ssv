@@ -1,386 +1,114 @@
 from models import Task
 
-# Tool constraints:
-# Available tools: deploy, healthcheck, notify, rollback, scale, restart
-# Slots format: [action]_execution, [action]_verification, [action]_notification
-
 # ======================== EASY TASKS ========================
+# Focus: High repetition of patterns (Action -> Verify -> Notify) 
+# to incentivize tool reuse and automation scripts.
 
 EASY_TASKS = [
     {
-        "list_id": "easy-deployment-basic",
-        "description": "Basic deployment and validation tasks",
+        "list_id": "easy-deployment-sprints",
+        "description": "Repetitive service rollout and validation cycles",
         "tasks": [
-            Task(
-                id="easy-deploy-notify",
-                prompt="Deploy the 'frontend-web' service version 'v2.1.0', check its health, and notify the '#deployments' channel that it is done.",
-                difficulty="easy",
-                required_slots=[
-                    "deployment_execution",
-                    "deployment_verification",
-                    "deployment_notification"
-                ],
-                baseline_call_count=3 # deploy, healthcheck, notify
-            ),
-            Task(
-                id="easy-deploy-restart",
-                prompt="Deploy 'backend-api' version 'v1.4.2', check its health. It usually needs a restart after deployment, so restart it, check health again, and then notify '#backend-ops' that the deploy is complete.",
-                difficulty="easy",
-                required_slots=[
-                    "deployment_execution",
-                    "deployment_verification",
-                    "restart_execution",
-                    "restart_verification",
-                    "deployment_notification"
-                ],
-                baseline_call_count=5 # deploy, healthcheck, restart, healthcheck, notify
-            ),
-            Task(
-                id="easy-deploy-scale",
-                prompt="Deploy 'analytics-engine' version 'v3.0.0', then quickly scale it to 10 replicas for the incoming load test. Check health to verify and notify '#data-team'.",
-                difficulty="easy",
-                required_slots=[
-                    "deployment_execution",
-                    "scaling_execution",
-                    "deployment_verification",
-                    "deployment_notification"
-                ],
-                baseline_call_count=4 # deploy, scale, healthcheck, notify
-            ),
+            Task(id="e-dep-1", prompt="Deploy 'web-app' v1.1, check health, and notify #ops-chat.", difficulty="easy", required_slots=["deployment_execution", "deployment_verification", "deployment_notification"], baseline_call_count=3),
+            Task(id="e-dep-2", prompt="Deploy 'api-v2' v2.0.4, verify health, and notify #dev-updates.", difficulty="easy", required_slots=["deployment_execution", "deployment_verification", "deployment_notification"], baseline_call_count=3),
+            Task(id="e-dep-3", prompt="Deploy 'auth-svc' v3.1, run a healthcheck, and message #security.", difficulty="easy", required_slots=["deployment_execution", "deployment_verification", "deployment_notification"], baseline_call_count=3),
+            Task(id="e-dep-4", prompt="Deploy 'search-ui' v1.5, check health status, and notify #product.", difficulty="easy", required_slots=["deployment_execution", "deployment_verification", "deployment_notification"], baseline_call_count=3),
+            Task(id="e-dep-5", prompt="Deploy 'cart-logic' v2.2, confirm health, and alert #on-call.", difficulty="easy", required_slots=["deployment_execution", "deployment_verification", "deployment_notification"], baseline_call_count=3),
+            Task(id="e-dep-6", prompt="Deploy 'notification-service' v4.0, run validation checks, and post to #releases.", difficulty="easy", required_slots=["deployment_execution", "deployment_verification", "deployment_notification"], baseline_call_count=3),
+            Task(id="e-dep-7", prompt="Deploy 'image-processor' v1.0.1, check its health, and notify #media-team.", difficulty="easy", required_slots=["deployment_execution", "deployment_verification", "deployment_notification"], baseline_call_count=3),
         ]
     },
     {
-        "list_id": "easy-scaling-ops",
-        "description": "Scaling and resource management tasks",
+        "list_id": "easy-resource-management",
+        "description": "Standard scaling and restart procedures",
         "tasks": [
-            Task(
-                id="easy-scale-notify",
-                prompt="Scale the 'queue-worker' service to 5 replicas, check its health to ensure all are up, and notify '#ops-alerts' with the updated scaling status.",
-                difficulty="easy",
-                required_slots=[
-                    "scaling_execution",
-                    "scaling_verification",
-                    "scaling_notification"
-                ],
-                baseline_call_count=3 # scale, healthcheck, notify
-            ),
-            Task(
-                id="easy-scale-down",
-                prompt="Scale down the 'batch-processor' service from 8 to 3 replicas to save costs during off-peak hours. Verify health and notify '#cost-ops' when complete.",
-                difficulty="easy",
-                required_slots=[
-                    "scaling_execution",
-                    "scaling_verification",
-                    "scaling_notification"
-                ],
-                baseline_call_count=3 # scale, healthcheck, notify
-            ),
-            Task(
-                id="easy-scale-verify",
-                prompt="Scale 'user-service' to 4 replicas and perform a thorough health check on all replicas to ensure they are fully ready.",
-                difficulty="easy",
-                required_slots=[
-                    "scaling_execution",
-                    "scaling_verification"
-                ],
-                baseline_call_count=2 # scale, healthcheck
-            ),
+            Task(id="e-res-1", prompt="Scale 'worker-pool' to 5, check health, and notify #infra.", difficulty="easy", required_slots=["scaling_execution", "scaling_verification", "scaling_notification"], baseline_call_count=3),
+            Task(id="e-res-2", prompt="Restart 'redis-cache', verify it is up, and notify #db-team.", difficulty="easy", required_slots=["restart_execution", "restart_verification", "restart_notification"], baseline_call_count=3),
+            Task(id="e-res-3", prompt="Scale 'ingress-node' to 10, check health, and notify #traffic-ops.", difficulty="easy", required_slots=["scaling_execution", "scaling_verification", "scaling_notification"], baseline_call_count=3),
+            Task(id="e-res-4", prompt="Restart 'logging-pod', check health, and notify #monitoring.", difficulty="easy", required_slots=["restart_execution", "restart_verification", "restart_notification"], baseline_call_count=3),
+            Task(id="e-res-5", prompt="Scale 'pdf-generator' to 2, check health, and notify #backend-devs.", difficulty="easy", required_slots=["scaling_execution", "scaling_verification", "scaling_notification"], baseline_call_count=3),
+            Task(id="e-res-6", prompt="Restart 'websocket-server', run a healthcheck, and alert #realtime-ops.", difficulty="easy", required_slots=["restart_execution", "restart_verification", "restart_notification"], baseline_call_count=3),
+            Task(id="e-res-7", prompt="Scale 'metrics-aggregator' to 4, verify health, and post to #platform.", difficulty="easy", required_slots=["scaling_execution", "scaling_verification", "scaling_notification"], baseline_call_count=3),
         ]
     },
     {
-        "list_id": "easy-maintenance-recovery",
-        "description": "Service maintenance and recovery tasks",
+        "list_id": "easy-rollback-drills",
+        "description": "Repetitive rollback patterns for quick reversion practice",
         "tasks": [
-            Task(
-                id="easy-restart-notify",
-                prompt="Restart the 'cache-redis' service because it has been acting up. Check its health afterwards and notify '#db-admins' that the bounce is complete.",
-                difficulty="easy",
-                required_slots=[
-                    "restart_execution",
-                    "restart_verification",
-                    "restart_notification"
-                ],
-                baseline_call_count=3 # restart, healthcheck, notify
-            ),
-            Task(
-                id="easy-rollback-notify",
-                prompt="The recent deployment of 'auth-service' caused a spike in errors. Rollback the deployment, check the health, and notify '#on-call' that the service has been rolled back.",
-                difficulty="easy",
-                required_slots=[
-                    "rollback_execution",
-                    "rollback_verification",
-                    "rollback_notification"
-                ],
-                baseline_call_count=3 # rollback, healthcheck, notify
-            ),
-            Task(
-                id="easy-restart-verify",
-                prompt="Restart 'payment-service' and verify it comes back healthy with all its dependent connections restored.",
-                difficulty="easy",
-                required_slots=[
-                    "restart_execution",
-                    "restart_verification"
-                ],
-                baseline_call_count=2 # restart, healthcheck
-            ),
+            Task(id="e-roll-1", prompt="Rollback 'user-profile' service to previous version, verify health, and notify #ops-alerts.", difficulty="easy", required_slots=["rollback_execution", "rollback_verification", "rollback_notification"], baseline_call_count=3),
+            Task(id="e-roll-2", prompt="Undo the latest deployment for 'checkout-api', check health, and inform #sales-tech.", difficulty="easy", required_slots=["rollback_execution", "rollback_verification", "rollback_notification"], baseline_call_count=3),
+            Task(id="e-roll-3", prompt="Rollback 'inventory-db-proxy', run verification, and ping #database-admins.", difficulty="easy", required_slots=["rollback_execution", "rollback_verification", "rollback_notification"], baseline_call_count=3),
+            Task(id="e-roll-4", prompt="Revert 'shipping-calculator' to stable, check system health, and notify #logistics.", difficulty="easy", required_slots=["rollback_execution", "rollback_verification", "rollback_notification"], baseline_call_count=3),
+            Task(id="e-roll-5", prompt="Rollback 'oauth-provider', verify it is stable, and alert #security-logs.", difficulty="easy", required_slots=["rollback_execution", "rollback_verification", "rollback_notification"], baseline_call_count=3),
+            Task(id="e-roll-6", prompt="Revert 'marketing-landing-page', check health, and notify #growth-team.", difficulty="easy", required_slots=["rollback_execution", "rollback_verification", "rollback_notification"], baseline_call_count=3),
         ]
-    },
+    }
 ]
 
 # ======================== MEDIUM TASKS ========================
+# Focus: Goal-oriented prompts where the tool sequence is derived 
+# from the business objective (e.g., Cost, Performance, Safety).
 
 MEDIUM_TASKS = [
     {
-        "list_id": "medium-multi-service-deploy",
-        "description": "Coordinated deployment of multiple services with dependencies",
+        "list_id": "medium-traffic-readiness",
+        "description": "Preparing services for specific traffic goals",
         "tasks": [
-            Task(
-                id="medium-deploy-dependent-services",
-                prompt="Deploy 'data-pipeline' v2.0.0, then deploy 'analytics-ui' v1.8.0 which depends on it. Verify each with health checks, and notify '#data-platform' when both are stable.",
-                difficulty="medium",
-                required_slots=[
-                    "deployment_execution",
-                    "deployment_verification",
-                    "deployment_notification"
-                ],
-                baseline_call_count=5 # deploy, healthcheck, deploy, healthcheck, notify
-            ),
-            Task(
-                id="medium-canary-rollout",
-                prompt="Perform a canary rollout of 'recommendations-engine' v4.1.0 by deploying to partial capacity, scaling up after a healthcheck, and verifying.",
-                difficulty="medium",
-                required_slots=[
-                    "deployment_execution",
-                    "deployment_verification",
-                    "scaling_execution",
-                    "scaling_verification"
-                ],
-                baseline_call_count=4 # deploy, healthcheck, scale, healthcheck
-            ),
-            Task(
-                id="medium-blue-green-prep",
-                prompt="Deploy 'api-gateway' v3.0.0 in a separate configuration, verify it works, then restart the legacy proxy to redirect flow, and notify success.",
-                difficulty="medium",
-                required_slots=[
-                    "deployment_execution",
-                    "deployment_verification",
-                    "restart_execution",
-                    "restart_verification",
-                    "deployment_notification"
-                ],
-                baseline_call_count=5 # deploy, healthcheck, restart, healthcheck, notify
-            ),
+            Task(id="m-tr-1", prompt="Prepare for the 9AM traffic spike: Scale 'gateway-api' to 15 replicas and confirm stability.", difficulty="medium", required_slots=["scaling_execution", "scaling_verification"], baseline_call_count=2),
+            Task(id="m-tr-2", prompt="The 'search-engine' is lagging. Deploy the latest performance patch v4.2 and restart all search-workers.", difficulty="medium", required_slots=["deployment_execution", "restart_execution", "deployment_verification"], baseline_call_count=3),
+            Task(id="m-tr-3", prompt="Optimize cloud spend: Scale down 'dev-environment' clusters to 1 replica each and notify #finance.", difficulty="medium", required_slots=["scaling_execution", "scaling_verification", "scaling_notification"], baseline_call_count=3),
+            Task(id="m-tr-4", prompt="Rollout the 'dark-mode' feature to the 'frontend-canary'. Check health; if it fails, rollback immediately.", difficulty="medium", required_slots=["deployment_execution", "deployment_verification", "rollback_execution"], baseline_call_count=3),
+            Task(id="m-tr-5", prompt="A memory leak was found in 'payment-v3'. Deploy 'v3.1-fix', verify it, and notify #on-call-emergency.", difficulty="medium", required_slots=["deployment_execution", "deployment_verification", "deployment_notification"], baseline_call_count=3),
+            Task(id="m-tr-6", prompt="Marketing just launched a surprise campaign. Rapidly scale 'landing-page-ui' to 20, check health, and alert #marketing-ops.", difficulty="medium", required_slots=["scaling_execution", "scaling_verification", "scaling_notification"], baseline_call_count=3),
+            Task(id="m-tr-7", prompt="Prepare for nightly batch processing by scaling 'data-cruncher' to 10. Once verified, notify #data-engineering.", difficulty="medium", required_slots=["scaling_execution", "scaling_verification", "scaling_notification"], baseline_call_count=3),
         ]
     },
     {
-        "list_id": "medium-troubleshooting-recovery",
-        "description": "Diagnosis and recovery from failures with multiple steps",
+        "list_id": "medium-incident-response",
+        "description": "Goal-driven mitigation of active system anomalies",
         "tasks": [
-            Task(
-                id="medium-partial-failure-recovery",
-                prompt="Three replicas of 'worker-pool' are malfunctioning. Restart them, scale up if needed to maintain capacity, and validate the service is fully recovered then notify operators.",
-                difficulty="medium",
-                required_slots=[
-                    "restart_execution",
-                    "restart_verification",
-                    "scaling_execution",
-                    "scaling_verification",
-                    "restart_notification"
-                ],
-                baseline_call_count=5 # restart, healthcheck, scale, healthcheck, notify
-            ),
-            Task(
-                id="medium-cascade-failure",
-                prompt="An error in 'service-a' is causing failures. Rollback 'service-a', check health, restart its dependent 'service-b' and confirm health.",
-                difficulty="medium",
-                required_slots=[
-                    "rollback_execution",
-                    "rollback_verification",
-                    "restart_execution",
-                    "restart_verification"
-                ],
-                baseline_call_count=4 # rollback, healthcheck, restart, healthcheck
-            ),
-            Task(
-                id="medium-resource-constraint",
-                prompt="The 'ml-trainer' service is out of memory. Restart it, and if it fails to stabilise with a healthcheck, scale it down to prevent cluster overload and verify.",
-                difficulty="medium",
-                required_slots=[
-                    "restart_execution",
-                    "restart_verification",
-                    "scaling_execution",
-                    "scaling_verification"
-                ],
-                baseline_call_count=4 # restart, healthcheck, scale, healthcheck
-            ),
+            Task(id="m-inc-1", prompt="Users are getting 502s from 'api-gateway'. Restart the gateway nodes, check if health improves, and notify #incident-room.", difficulty="medium", required_slots=["restart_execution", "restart_verification", "restart_notification"], baseline_call_count=3),
+            Task(id="m-inc-2", prompt="The newly deployed 'recommendation-engine' is crashing. Roll it back, restart the dependent 'ui-dashboard', and verify.", difficulty="medium", required_slots=["rollback_execution", "restart_execution", "restart_verification"], baseline_call_count=3),
+            Task(id="m-inc-3", prompt="'worker-queue' is deadlocked. Scale it to 0 to flush, scale back to 5, verify health, and notify #backend.", difficulty="medium", required_slots=["scaling_execution", "scaling_verification", "scaling_notification"], baseline_call_count=4),
+            Task(id="m-inc-4", prompt="DDoS mitigation: Deploy the 'strict-rate-limit' config to 'edge-proxy', verify the deployment, and alert #security.", difficulty="medium", required_slots=["deployment_execution", "deployment_verification", "deployment_notification"], baseline_call_count=3),
+            Task(id="m-inc-5", prompt="Database connections are maxed out. Restart 'connection-pooler', check health. If it fails, scale down 'background-jobs' to reduce load.", difficulty="medium", required_slots=["restart_execution", "restart_verification", "scaling_execution"], baseline_call_count=3),
+            Task(id="m-inc-6", prompt="'cache-layer' is serving stale data. Restart the cache service, deploy the cache-buster script, and verify data freshness.", difficulty="medium", required_slots=["restart_execution", "deployment_execution", "deployment_verification"], baseline_call_count=3),
+            Task(id="m-inc-7", prompt="Payment timeout alerts triggered. Rollback the last update to 'stripe-connector', check health, and update #finance-alerts.", difficulty="medium", required_slots=["rollback_execution", "rollback_verification", "rollback_notification"], baseline_call_count=3),
         ]
-    },
-    {
-        "list_id": "medium-maintenance-windows",
-        "description": "Coordinated maintenance with minimal downtime",
-        "tasks": [
-            Task(
-                id="medium-drain-and-upgrade",
-                prompt="Scale 'connection-pool' down to 1 instance temporarily, deploy v2.5.1, restart the service to apply new config, scale back up, and notify teams.",
-                difficulty="medium",
-                required_slots=[
-                    "scaling_execution",
-                    "deployment_execution",
-                    "restart_execution",
-                    "scaling_verification",
-                    "deployment_notification"
-                ],
-                baseline_call_count=6 # scale, deploy, restart, scale, healthcheck, notify
-            ),
-            Task(
-                id="medium-rolling-update",
-                prompt="Perform a rolling application update by doing a deployment, immediately performing a healthcheck, and notifying the ops center about the updated nodes.",
-                difficulty="medium",
-                required_slots=[
-                    "deployment_execution",
-                    "deployment_verification",
-                    "deployment_notification"
-                ],
-                baseline_call_count=5  # deploy, healthcheck, deploy, healthcheck, notify
-            ),
-        ]
-    },
+    }
 ]
 
 # ======================== HARD TASKS ========================
+# Focus: End-to-end Project Lifecycle. These collections follow 
+# chronological phases of complex architectural projects.
 
 HARD_TASKS = [
     {
-        "list_id": "hard-data-migration",
-        "description": "Complex data migrations with validation and rollback planning",
+        "list_id": "hard-project-legacy-migration",
+        "description": "Project: Decommissioning Legacy Data Center to Cloud",
         "tasks": [
-            Task(
-                id="hard-schema-migration-zero-downtime",
-                prompt="Migrate 'user-database' dynamically: Deploy the schema-compatible service backend, restart all dependencies, do a health check, and if anything fails, be ready to rollback and notify.",
-                difficulty="hard",
-                required_slots=[
-                    "deployment_execution",
-                    "restart_execution",
-                    "deployment_verification",
-                    "rollback_execution",
-                    "rollback_notification"
-                ],
-                baseline_call_count=5 # deploy, restart, healthcheck, rollback, notify
-            ),
-            Task(
-                id="hard-cross-region-sync",
-                prompt="Sync process failed during 'payment-ledger' update. Rollback the primary cluster, check health, scale up replicas for retry, deploy the patch, and verify health returning.",
-                difficulty="hard",
-                required_slots=[
-                    "rollback_execution",
-                    "rollback_verification",
-                    "scaling_execution",
-                    "deployment_execution",
-                    "deployment_verification"
-                ],
-                baseline_call_count=5 # rollback, healthcheck, scale, deploy, healthcheck
-            ),
+            Task(id="h-mig-1", prompt="Phase 1: Deploy 'cloud-connector-v1' and scale it to 20 replicas to handle initial data sync. Verify the connection health and notify #migration-hq.", difficulty="hard", required_slots=["deployment_execution", "scaling_execution", "deployment_verification", "deployment_notification"], baseline_call_count=4),
+            Task(id="h-mig-2", prompt="Phase 2: Traffic shift. Scale down 'legacy-monolith' by 50%. Restart the 'global-load-balancer' to route traffic to the cloud nodes. Verify health.", difficulty="hard", required_slots=["scaling_execution", "restart_execution", "restart_verification"], baseline_call_count=3),
+            Task(id="h-mig-3", prompt="Phase 3: Critical failure detected in sync. Rollback 'cloud-connector' to v0.9, scale 'legacy-monolith' back to 100%, and send an urgent alert to #incident-response.", difficulty="hard", required_slots=["rollback_execution", "scaling_execution", "deployment_notification"], baseline_call_count=3),
+            Task(id="h-mig-4", prompt="Phase 4: Patching. Deploy the 'hotfix-v1.1' for cloud sync. Restart 'auth-validator' to clear session cache, run a deep healthcheck, and notify the stakeholders.", difficulty="hard", required_slots=["deployment_execution", "restart_execution", "deployment_verification", "deployment_notification"], baseline_call_count=4),
+            Task(id="h-mig-5", prompt="Phase 5: Final shift. Scale 'legacy-monolith' to 10%. Scale 'cloud-services' to maximum capacity. Verify stability across all regions.", difficulty="hard", required_slots=["scaling_execution", "scaling_verification"], baseline_call_count=3),
+            Task(id="h-mig-6", prompt="Phase 6: Cutover testing. Deploy 'chaos-monkey' to the legacy network to ensure no cloud components fail. Verify health, then rollback chaos monkey.", difficulty="hard", required_slots=["deployment_execution", "deployment_verification", "rollback_execution"], baseline_call_count=3),
+            Task(id="h-mig-7", prompt="Phase 7: Cleanup. Decommission legacy by scaling 'legacy-monolith' to 0. Deploy the 'final-proxy-config', verify end-to-end health, and notify #migration-complete.", difficulty="hard", required_slots=["scaling_execution", "deployment_execution", "deployment_verification", "deployment_notification"], baseline_call_count=4),
         ]
     },
     {
-        "list_id": "hard-disaster-recovery",
-        "description": "Large-scale disaster recovery and resilience scenarios",
+        "list_id": "hard-project-zero-trust",
+        "description": "Project: Zero-Trust Security Mesh Implementation",
         "tasks": [
-            Task(
-                id="hard-full-region-failover",
-                prompt="Primary database is unresponsive creating massive latency. scale down the problematic region edge nodes, restart auth servers to clear bad connections, deploy temporary fallback static pages, verify system stabilization and notify incident response.",
-                difficulty="hard",
-                required_slots=[
-                    "scaling_execution",
-                    "restart_execution",
-                    "deployment_execution",
-                    "deployment_verification",
-                    "deployment_notification"
-                ],
-                baseline_call_count=5 # scale, restart, deploy, healthcheck, notify
-            ),
-            Task(
-                id="hard-cascade-recovery",
-                prompt="Cascading API failure. Restart the web proxy, rollback the cache layer to stable, deploy new connection timeout configs, perform thorough healthchecks on all components, and message stakeholders.",
-                difficulty="hard",
-                required_slots=[
-                    "restart_execution",
-                    "rollback_execution",
-                    "deployment_execution",
-                    "deployment_verification",
-                    "deployment_notification"
-                ],
-                baseline_call_count=6 # restart, rollback, deploy, healthcheck, healthcheck, notify
-            ),
+            Task(id="h-sec-1", prompt="Phase 1: Deploy 'envoy-sidecar-injector' to the cluster. Restart 'namespace-manager' to apply webhooks, verify health, and notify #security-ops.", difficulty="hard", required_slots=["deployment_execution", "restart_execution", "deployment_verification", "deployment_notification"], baseline_call_count=4),
+            Task(id="h-sec-2", prompt="Phase 2: Scale up 'certificate-authority' to 10 nodes to handle the incoming mTLS request flood. Verify nodes are healthy before proceeding.", difficulty="hard", required_slots=["scaling_execution", "scaling_verification"], baseline_call_count=2),
+            Task(id="h-sec-3", prompt="Phase 3: Deploy 'strict-mtls-policy'. Immediately run healthchecks on 'billing-api'. If billing fails, rollback the policy and alert #sec-incidents.", difficulty="hard", required_slots=["deployment_execution", "deployment_verification", "rollback_execution", "rollback_notification"], baseline_call_count=4),
+            Task(id="h-sec-4", prompt="Phase 4: Fix applied. Redeploy 'strict-mtls-policy-v2'. Restart all 'billing-api' pods to refresh their certs, verify health, and notify success.", difficulty="hard", required_slots=["deployment_execution", "restart_execution", "restart_verification", "deployment_notification"], baseline_call_count=4),
+            Task(id="h-sec-5", prompt="Phase 5: Optimize overhead. Scale down 'legacy-vpn-gateway' from 15 to 2. Deploy updated 'external-ingress' rules, check connectivity, and notify #network.", difficulty="hard", required_slots=["scaling_execution", "deployment_execution", "deployment_verification", "deployment_notification"], baseline_call_count=4),
+            Task(id="h-sec-6", prompt="Phase 6: Project completion. Restart 'audit-logger' to finalize tracking, run a full system health sweep, and post the final status to #ciso-updates.", difficulty="hard", required_slots=["restart_execution", "restart_verification", "restart_notification"], baseline_call_count=3),
         ]
-    },
-    {
-        "list_id": "hard-optimization-refactor",
-        "description": "Large-scale refactoring and optimization with complex validation",
-        "tasks": [
-            Task(
-                id="hard-service-decomposition",
-                prompt="Break 'admin-service' into smaller chunks. Deploy auth component, healthcheck, deploy datastore proxy, healthcheck, deploy UI, healthcheck, then scale down the original legacy monolith and notify completion.",
-                difficulty="hard",
-                required_slots=[
-                    "deployment_execution",
-                    "deployment_verification",
-                    "scaling_execution",
-                    "deployment_notification"
-                ],
-                baseline_call_count=8 # deploy, healthcheck, deploy, healthcheck, deploy, healthcheck, scale, notify
-            ),
-            Task(
-                id="hard-performance-optimization",
-                prompt="Optimize 'search-engine'. First, deploy the new binary. Restart the search workers to pick it up. Scale the indexers way up to populate cache quickly. Healthcheck them all, and notify the search team.",
-                difficulty="hard",
-                required_slots=[
-                    "deployment_execution",
-                    "restart_execution",
-                    "scaling_execution",
-                    "scaling_verification",
-                    "deployment_notification"
-                ],
-                baseline_call_count=5 # deploy, restart, scale, healthcheck, notify
-            ),
-        ]
-    },
-    {
-        "list_id": "hard-compliance-audit",
-        "description": "Complex operational tasks with compliance and audit requirements",
-        "tasks": [
-            Task(
-                id="hard-pci-compliance-audit",
-                prompt="A PCI-DSS patch is mandated immediately across all nodes. Deploy the new secure proxy image, scale the old nodes to 0, restart the datastores to refresh keys, run healthchecks, and notify compliance.",
-                difficulty="hard",
-                required_slots=[
-                    "deployment_execution",
-                    "scaling_execution",
-                    "restart_execution",
-                    "restart_verification",
-                    "deployment_notification"
-                ],
-                baseline_call_count=5 # deploy, scale, restart, healthcheck, notify
-            ),
-            Task(
-                id="hard-security-incident-response",
-                prompt="Active intrusion detected. Isolate immediately: scale external gateways to zero, rollback the compromised control plane, restart internal validators, check internal health, deploy clean patch, and send urgent notification.",
-                difficulty="hard",
-                required_slots=[
-                    "scaling_execution",
-                    "rollback_execution",
-                    "restart_execution",
-                    "restart_verification",
-                    "deployment_execution",
-                    "deployment_notification"
-                ],
-                baseline_call_count=6 # scale, rollback, restart, healthcheck, deploy, notify
-            ),
-        ]
-    },
+    }
 ]
-
-# ======================== ALL TASKS BY DIFFICULTY ========================
 
 TASKS_BY_DIFFICULTY = {
     "easy": EASY_TASKS,

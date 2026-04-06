@@ -183,7 +183,7 @@ async def main() -> None:
     log_start(task=TASK_NAME, env=BENCHMARK, model=MODEL_NAME)
 
     try:
-        result = await env.reset(task=TASK_NAME, mode="eval", difficulty="easy") # OpenENV.reset()
+        result = await env.reset(task=TASK_NAME, mode="eval", difficulty="medium") # OpenENV.reset()
         obs = result.observation
         task = obs.current_task
         available_tools = obs.available_tools
@@ -195,9 +195,15 @@ async def main() -> None:
             if result.done:
                 break
 
+            
+            print()
+            print(task.prompt)
+            print()
             action = get_model_action(client, step, task.prompt, available_tools, last_reward, history)
             result = await env.step(action)
             obs = result.observation
+            task = obs.current_task
+            available_tools = obs.available_tools
 
             reward = result.reward or 0.0
             done = result.done
