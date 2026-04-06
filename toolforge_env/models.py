@@ -20,13 +20,7 @@ class ToolCall(BaseModel):
     It encapsulates the tool's identity, the arguments provided, and the cost in tokens.
     """
     # Name of the tool being called
-    tool_name: str
-    
-    # Parameters passed to the tool
-    params: Dict[str, Any]
-    
-    # Token cost of calling this tool
-    token_cost: int
+    tool_name: str    
 
 
 class Tool(BaseModel):
@@ -40,9 +34,6 @@ class Tool(BaseModel):
     # Human-readable description of what the tool does
     description: str
     
-    # Schema defining the expected parameters
-    params_schema: Dict[str, Any]
-    
     # Flag indicating whether this tool is a macro (composed of smaller tools)
     is_macro: bool = False
     
@@ -50,7 +41,7 @@ class Tool(BaseModel):
     token_cost: int
     
     # Optional list of tool names this macro is composed of
-    composed_of: Optional[List[str]] = None
+    steps: Optional[List[ToolCall]] = None
 
 
 
@@ -125,14 +116,9 @@ class ToolforgeAction(Action):
     )
 
     # Optional proposal for a new macro, if action_type is "propose_plan_with_macro"
-    macro_proposal: Optional[MacroProposal] = Field(
+    macro_proposal: Optional[Tool] = Field(
         None,
         description="Optional proposal for a new macro, used when action_type is 'propose_plan_with_macro'"
-    )
-
-    # Agent's reasoning for this action
-    reasoning: str = Field(
-        ..., description="Agent's reasoning for this action"
     )
 
 
@@ -145,7 +131,7 @@ class ToolforgeObservation(Observation):
     )
 
     # List of tools currently available to the agent
-    available_tools: List[Tool] = Field(
+    available_tools: List[Dict[str, Any]] = Field(
         ..., description="List of tools currently available to the agent"
     )
 

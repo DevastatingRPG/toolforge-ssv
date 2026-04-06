@@ -51,8 +51,8 @@ from typing import List, Optional, Dict, Any
 from openai import OpenAI
 
 from toolforge_env import ToolforgeAction, ToolforgeEnv
-from toolforge_env.models import ToolCall
-IMAGE_NAME = os.getenv("IMAGE_NAME") # If you are using docker image 
+from models import ToolCall, Tool
+IMAGE_NAME = os.getenv("IMAGE_NAME", "openenv-toolforge") # If you are using docker image 
 API_KEY = os.getenv("HF_TOKEN") or os.getenv("API_KEY")
 
 API_BASE_URL = os.getenv("API_BASE_URL") or "https://router.huggingface.co/v1"
@@ -61,7 +61,7 @@ TASK_NAME = os.getenv("MY_ENV_V4_TASK", "echo")
 BENCHMARK = os.getenv("MY_ENV_V4_BENCHMARK", "my_env_v4")
 MAX_STEPS = 8
 TEMPERATURE = 0.7
-MAX_TOKENS = 400
+MAX_TOKENS = 500
 SUCCESS_SCORE_THRESHOLD = 0.1  # normalized score in [0, 1]
 
 # Max possible reward: each token contributes 0.1, across all steps
@@ -97,7 +97,7 @@ def log_end(success: bool, steps: int, score: float, rewards: List[float]) -> No
     print(f"[END] success={str(success).lower()} steps={steps} score={score:.3f} rewards={rewards_str}", flush=True)
 
 
-def build_user_prompt(step: int, current_task: str, available_tools: List[str], last_reward: float, history: List[str]) -> str:
+def build_user_prompt(step: int, current_task: str, available_tools: List[Dict[str, Any]], last_reward: float, history: List[str]) -> str:
     history_block = "\n".join(history[-4:]) if history else "None"
     return textwrap.dedent(
         f"""
@@ -112,14 +112,13 @@ def build_user_prompt(step: int, current_task: str, available_tools: List[str], 
     ).strip()
 
 
-def build_fallback_action(available_tools: List[str], current_task: str) -> ToolforgeAction:
-    fallback_tool = available_tools[0] if available_tools else "noop"
+def build_fallback_action(available_tools: List[Dict[str, Any]], current_task: str) -> ToolforgeAction:
+    fallback_tool = available_tools[0]["name"] if available_tools else "noop"
     return ToolforgeAction(
         action_type="propose_plan",
         plan=[
-            ToolCall(tool_name=fallback_tool, params={"task": current_task}, token_cost=0)
+            ToolCall(tool_name=fallback_tool)
         ],
-        reasoning="Fallback action because structured model parsing failed.",
         macro_proposal=None
     )
 
@@ -153,7 +152,10 @@ def get_model_action(
             model=MODEL_NAME,
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT + "\nRespond ONLY with valid JSON matching the ToolforgeAction schema. No markdown, no explanation."},
-                {"role": "user", "content": user_prompt + f"\n\nSchema:\n{json.dumps(ToolforgeAction.model_json_schema(), indent=2)}"},
+                {"role": "user", "content": user_prompt + 
+                 f"\n\nSchema:\n{json.dumps(ToolforgeAction.model_json_schema(), indent=2)}" + 
+                 f"\n\nToolSchema:\n{json.dumps(Tool.model_json_schema(), indent=2)}" +
+                 f"\n\nToolCallSchema:\n{json.dumps(ToolCall.model_json_schema(), indent=2)}"},
             ],
             temperature=TEMPERATURE,
             max_tokens=MAX_TOKENS,
@@ -194,7 +196,6 @@ async def main() -> None:
                 break
 
             action = get_model_action(client, step, task.prompt, available_tools, last_reward, history)
-
             result = await env.step(action)
             obs = result.observation
 

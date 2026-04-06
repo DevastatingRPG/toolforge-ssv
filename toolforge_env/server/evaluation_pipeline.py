@@ -35,7 +35,7 @@ def run_evaluation_pipeline(
     goal_achieved: bool = False,
     sequence_counts: Optional[Dict[str, int]] = None,
     macro_definitions: Optional[Dict[str, List[str]]] = None,
-    macro_proposal: Optional[MacroProposal] = None,
+    macro_proposal: Optional[Tool] = None,
 ) -> PipelineResult:
     """Run the evaluation pipeline on a proposed plan."""
     

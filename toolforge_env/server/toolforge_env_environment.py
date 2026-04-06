@@ -143,8 +143,24 @@ class ToolforgeEnvironment(Environment):
         """
         return ToolforgeObservation(
             current_task=self._state.current_task,
-            available_tools=self._state.available_tools,
+            available_tools=self._available_tools_to_prompt_specs(self._state.available_tools),
         )
+
+    def _tool_to_prompt_spec(self, tool: Tool) -> Dict[str, Any]:
+        """Convert a Tool model into a plain prompt-friendly dictionary."""
+
+        return {
+            "name": tool.name,
+            "description": tool.description,
+            "is_macro": tool.is_macro,
+            "token_cost": tool.token_cost,
+            "steps": tool.steps or [],
+        }
+
+    def _available_tools_to_prompt_specs(self, tools: List[Tool]) -> List[Dict[str, Any]]:
+        """Convert available tools to plain dictionaries ready for prompt injection."""
+
+        return [self._tool_to_prompt_spec(tool) for tool in tools]
 
     def reset(        
             self, 
@@ -310,7 +326,7 @@ class ToolforgeEnvironment(Environment):
 
         return ToolforgeObservation(
             current_task=self._state.current_task,
-            available_tools=self._state.available_tools,
+            available_tools=self._available_tools_to_prompt_specs(self._state.available_tools),
             done=self._is_done(),
             reward=reward,
             metadata={
@@ -438,6 +454,14 @@ class ToolforgeEnvironment(Environment):
                 reason="macro_name_cannot_be_empty",
             )
 
+        if not proposal.steps:
+            return self._reject_macro(
+                result=result,
+                name=None,
+                reason="macro_steps_cannot_be_empty",
+            )
+
+
         existing_names = {tool.name for tool in self._state.available_tools}
         if macro_name in existing_names:
             return self._reject_macro(
@@ -490,14 +514,8 @@ class ToolforgeEnvironment(Environment):
         macro_tool = Tool(
             name=macro_name,
             description=proposal.description.strip() or f"Macro: {' -> '.join(composed_of)}",
-            params_schema={
-                "type": "object",
-                "properties": {},
-                "required": [],
-            },
             is_macro=True,
             token_cost=macro_token_cost,
-            composed_of=composed_of,
         )
 
         self._state.accepted_macros.append(macro_tool)
