@@ -132,22 +132,7 @@ def get_model_action(
     history: List[str],
 ) -> ToolforgeAction:
     user_prompt = build_user_prompt(step, current_task, available_tools, last_reward, history)
-    try:
-        # completion = client.beta.chat.completions.parse(
-        #     model=MODEL_NAME,
-        #     messages=[
-        #         {"role": "system", "content": SYSTEM_PROMPT},
-        #         {"role": "user", "content": user_prompt},
-        #     ],
-        #     response_format=ToolforgeAction,
-        #     temperature=TEMPERATURE,
-        #     max_tokens=MAX_TOKENS,
-        # )
-        # parsed = completion.choices[0].message.parsed
-        # if parsed is None:
-        #     raise ValueError("Model returned no parsed ToolforgeAction.")
-        # return parsed
-    
+    try:    
         completion = client.chat.completions.create(
             model=MODEL_NAME,
             messages=[
@@ -160,7 +145,11 @@ def get_model_action(
             temperature=TEMPERATURE,
             max_tokens=MAX_TOKENS,
         )
-        raw = completion.choices[0].message.content.strip()
+        raw = completion.choices[0].message.content
+        if raw is None:
+            print(f"[DEBUG] Model returned None content")
+            return build_fallback_action(available_tools, current_task)
+        raw = raw.strip()
         raw = raw.replace("```json", "").replace("```", "").strip()
         return ToolforgeAction(**json.loads(raw))
 
@@ -183,7 +172,7 @@ async def main() -> None:
     log_start(task=TASK_NAME, env=BENCHMARK, model=MODEL_NAME)
 
     try:
-        result = await env.reset(task=TASK_NAME, mode="eval", difficulty="easy") # OpenENV.reset()
+        result = await env.reset(task=TASK_NAME, mode="eval", difficulty="medium") # OpenENV.reset()
         obs = result.observation
         task = obs.current_task
         available_tools = obs.available_tools
@@ -195,9 +184,15 @@ async def main() -> None:
             if result.done:
                 break
 
+            
+            print()
+            print(task.prompt)
+            print()
             action = get_model_action(client, step, task.prompt, available_tools, last_reward, history)
             result = await env.step(action)
             obs = result.observation
+            task = obs.current_task
+            available_tools = obs.available_tools
 
             reward = result.reward or 0.0
             done = result.done

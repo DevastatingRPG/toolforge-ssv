@@ -47,15 +47,15 @@ except ImportError:
     )
 
 try:
+    from server.tools import build_atomic_tools
+    from server.evaluation_pipeline import run_evaluation_pipeline
+    from server.inputs.simulated.data_loader import SimulatedDataLoader
+    from server.plan_evaluator import update_sequence_counts
+except ImportError:
     from .tools import build_atomic_tools
     from .evaluation_pipeline import run_evaluation_pipeline
     from .inputs.simulated.data_loader import SimulatedDataLoader
     from .plan_evaluator import update_sequence_counts
-except ImportError:
-    from tools import build_atomic_tools
-    from evaluation_pipeline import run_evaluation_pipeline
-    from inputs.simulated.data_loader import SimulatedDataLoader
-    from plan_evaluator import update_sequence_counts
 
 
 logger = logging.getLogger(__name__)
@@ -94,7 +94,7 @@ class ToolforgeEnvironment(Environment):
         self._reset_count = 0
 
         self._input_provider_factory = input_provider_factory
-        self._input_provider = None
+        self._input_provider: Optional[InputProvider] = None
         self._last_approval: Optional[bool] = None
 
         # persistent config
@@ -326,30 +326,12 @@ class ToolforgeEnvironment(Environment):
 
         # Fetch the scalar reward from the evaluation pipeline
         reward = float(pipeline_result.reward)
-
+        print(self._state.current_task.prompt, reward, progression, macro_result)
         return ToolforgeObservation(
             current_task=self._state.current_task,
             available_tools=self._available_tools_to_prompt_specs(self._state.available_tools),
             done=self._is_done(),
-            reward=reward,
-            metadata={
-                "step": self._state.step_count,
-                "summary": pipeline_result.summary,
-                "passed_validation": bool(pipeline_result.passed_validation),
-                "plan_accepted": bool(pipeline_result.passed_validation),
-                "task_prompt": self._state.current_task.prompt,
-                "task_level": self._state.current_task.difficulty,
-                "progression": progression,
-                "macro_attempted": macro_result["attempted"],
-                "macro_decision": macro_result["decision"],
-                "macro_name": macro_result["name"],
-                "macro_reason": macro_result["reason"],
-                "accepted_macro_count": len(self._state.accepted_macros),
-                "step_call_count": step_call_count,
-                "token_accounting_source": "tool_registry",
-                "unknown_tool_calls": unknown_tool_calls,
-                "last_approval": self._last_approval,
-            },
+            reward=reward
         )
 
     def _advance_to_next_task(self) -> bool:
@@ -369,6 +351,7 @@ class ToolforgeEnvironment(Environment):
 
         next_task = self._get_next_task_from_generator()
         self._state.current_task = next_task
+        print("Prompt change")
         self._sync_task_queue_from_generator()
         logger.info(
             "Task advanced from '%s' to '%s'. Remaining tasks=%d",
@@ -543,7 +526,7 @@ class ToolforgeEnvironment(Environment):
 
     def _get_next_task_from_generator(self) -> Task:
         """Return next task from generator supporting get() or get_input()."""
-
+        print("Prompt change")
         if self._input_provider is None:
             raise RuntimeError("Task data generator not initialized. Call reset() first.")
 
