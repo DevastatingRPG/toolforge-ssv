@@ -71,10 +71,37 @@ MAX_TOTAL_REWARD = MAX_STEPS * _MAX_REWARD_PER_STEP
 SYSTEM_PROMPT = textwrap.dedent(
     """
     You are an agent acting in the Toolforge environment.
-    Produce a valid ToolforgeAction object that matches the provided schema.
-    Build a concise plan using only the tools listed in the prompt.
-    Prefer `action_type="propose_plan"` unless a macro proposal is genuinely helpful.
-    Keep reasoning brief and make every plan step actionable.
+    Return ONLY valid JSON matching the ToolforgeAction schema.
+
+    Objective:
+    - Maximize reward by completing task-required behavior with the relevant useful tool calls.
+
+    Rules:
+    - Use only tool names that appear in Available tools.
+    - Keep the plan minimal and avoid unnecessary calls.
+    - Use action_type="propose_plan" by default.
+    - If proposing a macro, use action_type="propose_plan_with_macro" and include macro_proposal.
+    - macro_proposal.steps must be an ordered sequence of at least 2 existing non-macro tools.
+    - Do not use a newly proposed macro in the same step's plan.
+    - If reusing an existing macro, do NOT send macro_proposal.
+    - Never propose a macro name that already exists in Available tools.
+
+    Macro policy:
+    - Detect repetition by operation signature, not by exact wording.
+    - Treat different service names/channels/contexts as the same pattern if tool order is the same.
+    - Build a canonical pattern signature from tool order (for example: restart->healthcheck->notify).
+    - Reuse an existing macro immediately when it matches the needed sequence.
+    - Create a macro only when a contiguous ordered sequence has already repeated in prior steps.
+    - Propose each macro only once. After approval, switch to action_type="propose_plan" with macro_proposal=null.
+    - Prefer reusable patterns seen across task names and phases, not one-off service-specific steps.
+    - Good reusable patterns include deploy->healthcheck->notify, restart->healthcheck->notify, rollback->healthcheck->notify, rollback->restart->healthcheck, scale->healthcheck->notify, and restart->deploy->healthcheck.
+    - Some tasks are intentionally varied in wording; still group them by the same underlying tool-order signature.
+    - This evaluator often treats each plan entry as filling at most one required slot.
+    - Therefore, avoid macro-only one-entry plans for multi-slot tasks.
+    - If task.required_slots has length N, prefer a plan with at least N entries, mixing macro calls with needed atomic calls.
+
+    Naming:
+    - Use short snake_case names that describe the operation pattern.
     """
 ).strip()
 
@@ -97,8 +124,9 @@ def log_end(success: bool, steps: int, score: float, rewards: List[float]) -> No
     print(f"[END] success={str(success).lower()} steps={steps} score={score:.3f} rewards={rewards_str}", flush=True)
 
 
-def build_user_prompt(step: int, current_task: str, available_tools: List[Dict[str, Any]], last_reward: float, history: List[str]) -> str:
+def build_user_prompt(step: int, current_task: Any, available_tools: List[Dict[str, Any]], last_reward: float, history: List[str]) -> str:
     history_block = "\n".join(history[-4:]) if history else "None"
+
     return textwrap.dedent(
         f"""
         Step: {step}
@@ -107,7 +135,20 @@ def build_user_prompt(step: int, current_task: str, available_tools: List[Dict[s
         Last reward: {last_reward:.2f}
         Previous steps:
         {history_block}
-        Return a ToolforgeAction whose `plan` uses only the available tools.
+
+        Decision policy for macros:
+        - First normalize the task into an operation signature using only tool order, ignoring service names and channel names.
+        - If an existing macro matches the needed ordered sequence, reuse it now.
+        - When reusing an existing macro, set action_type to propose_plan and set macro_proposal to null.
+        - If the same normalized contiguous signature has appeared in earlier steps at least twice, and no existing macro covers it, propose a macro with propose_plan_with_macro.
+        - Propose a given macro name only once; never re-propose an existing macro.
+        - Never include a newly proposed macro in the same step plan.
+        - If required_slots has length N, try to output at least N plan entries.
+        - Avoid macro-only plans that underfill task requirements; include any additional atomic calls needed.
+        - Prefer generic repeatable patterns across easy, medium, and hard tasks.
+        - Keep the plan short while satisfying required task intent.
+
+        Return a ToolforgeAction whose `plan` uses only currently available tools.
         """
     ).strip()
 
@@ -177,17 +218,15 @@ async def main() -> None:
         task = obs.current_task
         available_tools = obs.available_tools
         # history = obs.history
-        history = []
+        history = [
+            f"EpisodeStart|task_id {getattr(task, 'id', 'unknown')}|difficulty {getattr(task, 'difficulty', 'unknown')}|prompt {getattr(task, 'prompt', '')}"
+        ]
         last_reward = 0.0
 
         for step in range(1, MAX_STEPS + 1):
             if result.done:
                 break
 
-            
-            print()
-            print(task.prompt)
-            print()
             action = get_model_action(client, step, task.prompt, available_tools, last_reward, history)
             result = await env.step(action)
             obs = result.observation
@@ -210,7 +249,7 @@ async def main() -> None:
                 error=error,
             )
 
-            history.append(f"Step {step}: {action.model_dump_json()} -> reward {reward:+.2f}")
+            history.append(f"{action.model_dump_json()}|Step {step}|reward {reward:+.2f}|task_id {getattr(task, 'id', 'unknown')}|difficulty {getattr(task, 'difficulty', 'unknown')}")
 
             if done:
                 break

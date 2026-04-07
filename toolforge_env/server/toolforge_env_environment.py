@@ -309,6 +309,9 @@ class ToolforgeEnvironment(Environment):
             reject_reason="plan_not_accepted",
         )
 
+        if macro_result["decision"] == "approved" and action.macro_proposal is not None:
+            self._state.available_tools.append(action.macro_proposal)
+
         # Fetch the scalar reward from the evaluation pipeline
         reward = float(pipeline_result.reward)
         print(self._state.current_task.prompt, reward, progression, macro_result)
