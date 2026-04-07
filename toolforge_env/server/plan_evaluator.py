@@ -12,8 +12,12 @@ Functions are pure and deterministic where possible.
 """
 
 import logging
+import json
 import math
+import os
 from typing import Any, Dict, List, Optional, Tuple
+
+from openai import OpenAI
 
 from toolforge_env.models import (
     MacroProposal,
@@ -25,6 +29,10 @@ from toolforge_env.models import (
     ToolCall,
     ToolEvaluation,
     ValidationResult,
+)
+from toolforge_env.server.llm_eval_prompts import (
+    SLOT_JUDGE_SYSTEM_PROMPT,
+    build_slot_judge_user_prompt,
 )
 from toolforge_env.server.slots import DEVOPS_SLOTS
 
@@ -44,6 +52,10 @@ TOKEN_EFFICIENCY_MAX = 1.0
 RECOGNITION_THRESHOLD = 2
 ALPHA_RECOGNITION = 0.10
 ALPHA_UTILITY = 0.20
+
+API_BASE_URL = os.getenv("API_BASE_URL", "https://router.huggingface.co/v1")
+MODEL_NAME = os.getenv("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")
+HF_TOKEN = os.getenv("HF_TOKEN", "")
 
 # --- Helper Functions for Stage 2 (Semantic Judge) ---
 
@@ -104,6 +116,37 @@ def _simulate_llm_judgment(
         
     return results
 
+
+def _call_llm_slot_judgment(
+    task_prompt: str,
+    required_slots: List[str],
+    slot_definitions: Dict[str, str],
+    available_tools: List[Tool],
+    plan: List[ToolCall],
+) -> Dict[str, Any]:
+    """Call the OpenAI-compatible LLM and return its JSON response."""
+    client = OpenAI(base_url=API_BASE_URL, api_key=HF_TOKEN or None)
+    user_prompt = build_slot_judge_user_prompt(
+        task_prompt=task_prompt,
+        required_slots=required_slots,
+        slot_definitions=slot_definitions,
+        plan=[{"tool_name": call.tool_name, "tool_description": call.tool_description} for call in plan],
+    )
+
+    completion = client.chat.completions.create(
+        model=MODEL_NAME,
+        messages=[
+            {"role": "system", "content": SLOT_JUDGE_SYSTEM_PROMPT},
+            {"role": "user", "content": user_prompt},
+        ],
+        temperature=0.0,
+        response_format={"type": "json_object"},
+    )
+
+    content = completion.choices[0].message.content or "{}"
+    content = content.strip().replace("```json", "").replace("```", "").strip()
+    return json.loads(content)
+
 def _parse_simulated_judgment(raw_results: List[Dict[str, Any]], required_slots: List[str]) -> SlotJudgmentResult:
     """Helper to convert the raw simulated LLM output into SlotJudgmentResult."""
     evaluations = []
@@ -146,9 +189,6 @@ def calculate_dynamic_baseline_tokens(task: Task, available_tools: Dict[str, Too
     Slot-driven baseline: uses baseline_token_cost when provided,
     otherwise falls back to baseline_call_count for compatibility.
     """
-    if task.baseline_token_cost > 0:
-        return task.baseline_token_cost
-
     if task.baseline_call_count > 0:
         return task.baseline_call_count
 
@@ -185,12 +225,11 @@ def calculate_atomic_equivalent_cost(
     sequence: Tuple[str, ...],
     tool_registry: Dict[str, Tool],
 ) -> int:
-    """Sum token cost of the atomic tools in the sequence."""
+    """Sum equivalent cost of the atomic tools in the sequence (1 unit per call)."""
     total = 0
     for name in sequence:
-        tool = tool_registry.get(name)
-        if tool is not None:
-            total += tool.token_cost
+        if name in tool_registry:
+            total += 1
     return total
 
 def calculate_macro_utility_bonus(
@@ -263,6 +302,21 @@ def run_sanity_validation(
 
     return ValidationResult(valid=True, reason="VALID", penalty=0.0)
 
+def _expand_macros_in_plan(plan: List[ToolCall], available_tools: List[Tool]) -> List[ToolCall]:
+    """Recursively expand macro calls into their atomic components for semantic evaluation."""
+    tool_map = {t.name: t for t in available_tools}
+    expanded_plan = []
+    
+    for call in plan:
+        tool = tool_map.get(call.tool_name)
+        if tool and tool.is_macro and tool.steps:
+            # Macros are typically 1-level, but we expand recursively for robustness
+            expanded_plan.extend(_expand_macros_in_plan(tool.steps, available_tools))
+        else:
+            expanded_plan.append(call)
+            
+    return expanded_plan
+
 def run_slot_judgment(
     task_prompt: str,
     required_slots: List[str],
@@ -271,12 +325,30 @@ def run_slot_judgment(
     plan: List[ToolCall],
 ) -> SlotJudgmentResult:
     """Stage 2: Evaluate a validated plan against the task's semantic slots."""
+    
+    # Expand macros into atomic steps so the LLM evaluator can use tool descriptions
+    # expanded_plan = _expand_macros_in_plan(plan, available_tools)
+    # logger.debug(f"Stage 2 expansion: original_len={len(plan)}, expanded_len={len(expanded_plan)}")
+
     req = _build_judge_request(task_prompt, required_slots, slot_definitions, available_tools, plan)
-    raw = _simulate_llm_judgment(req, plan, required_slots)
+    try:
+        raw_json = _call_llm_slot_judgment(
+            task_prompt=task_prompt,
+            required_slots=required_slots,
+            slot_definitions=slot_definitions,
+            available_tools=available_tools,
+            plan=plan,
+        )
+        raw = raw_json.get("evaluations", [])
+        if not raw:
+            raise ValueError("LLM returned no evaluations")
+    except Exception as exc:
+        logger.warning("LLM slot judge failed, falling back to simulated judgment: %s", exc)
+        raw = _simulate_llm_judgment(req, plan, required_slots)
     
     result = _parse_simulated_judgment(raw, required_slots)
     if result.harmful_calls_present:
-        logger.warning("Simulated Judge detected harmful calls in plan.")
+        logger.warning("Slot judge detected harmful calls in plan.")
         
     return result
 
@@ -328,7 +400,7 @@ def run_token_calculation(
 ) -> TokenCostResult:
     """Stage 4: Compute a token-efficiency score and macro savings for a plan."""
     baseline_tokens = calculate_dynamic_baseline_tokens(task, available_tools)
-    tokens_used = sum(0 for call in plan)
+    tokens_used = len(plan)
     
     if baseline_tokens <= 0:
         efficiency_ratio = 0.0
@@ -360,7 +432,7 @@ def run_token_calculation(
                 seq = tuple(macro_definitions[call.tool_name])
                 atomic_cost = calculate_atomic_equivalent_cost(seq, available_tools)
                 macro_tool = available_tools.get(call.tool_name)
-                macro_call_cost = macro_tool.token_cost if macro_tool else 0
+                macro_call_cost = 1 if macro_tool else 0
                 macro_utility_bonus += calculate_macro_utility_bonus(
                     macro_used=True,
                     atomic_equivalent_cost=atomic_cost,
@@ -368,10 +440,13 @@ def run_token_calculation(
                     alpha_utility=ALPHA_UTILITY,
                 )
 
-    macro_bonus = MACRO_USAGE_BONUS if (macro_used and efficiency_ratio > 0) else 0.0
+    macro_bonus = MACRO_USAGE_BONUS if macro_used else 0.0
     macro_bonus += macro_recognition_bonus + macro_utility_bonus
     
+    # Allow macro_bonus even if the user just matches or is slightly below baseline efficiency.
+    # This rewards the learning of compressed representations (macros).
     efficiency_score = efficiency_ratio + macro_bonus
+    
     efficiency_score = max(TOKEN_EFFICIENCY_MIN, min(TOKEN_EFFICIENCY_MAX, efficiency_score))
     
     logger.debug(
@@ -392,10 +467,13 @@ def run_token_calculation(
 
 def reward_calculation(
     plan_accuracy: PlanAccuracyResult,
-    token_cost: TokenCostResult,
+    token_cost: Optional[TokenCostResult] = None,
 ) -> float:
     """Stage 5: True reward function combining Stage 3 and Stage 4. (-1.0 to 1.0)"""
-    reward = (PLAN_ACCURACY_WEIGHT * plan_accuracy.score) + (TOKEN_EFFICIENCY_WEIGHT * token_cost.efficiency_score)
+    if token_cost is None:
+        reward = plan_accuracy.score
+    else:
+        reward = (PLAN_ACCURACY_WEIGHT * plan_accuracy.score) + (TOKEN_EFFICIENCY_WEIGHT * token_cost.efficiency_score)
     final_score = max(FINAL_REWARD_MIN, min(FINAL_REWARD_MAX, reward))
     
     logger.info(f"Final Reward: {final_score:.3f}")

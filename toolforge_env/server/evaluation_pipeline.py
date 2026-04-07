@@ -152,23 +152,27 @@ def run_evaluation_pipeline(
     )
 
     # 4. run_token_calculation(...)
-    token_cost = run_token_calculation(
-        plan=plan,
-        accepted_macros=accepted_macros,
-        task=task,
-        available_tools=available_tools,
-        sequence_counts=sequence_counts,
-        macro_definitions=macro_definitions,
-        macro_proposal=macro_proposal,
-    )
-    logger.info(
-        "Stage4 token | used=%d | baseline=%d | efficiency_ratio=%.3f | efficiency_score=%.3f | macro_bonus=%.3f",
-        token_cost.tokens_used,
-        token_cost.baseline_tokens,
-        token_cost.efficiency_ratio,
-        token_cost.efficiency_score,
-        token_cost.macro_bonus,
-    )
+    token_cost = None
+    if slot_judgment.task_complete:
+        token_cost = run_token_calculation(
+            plan=plan,
+            accepted_macros=accepted_macros,
+            task=task,
+            available_tools=available_tools,
+            sequence_counts=sequence_counts,
+            macro_definitions=macro_definitions,
+            macro_proposal=macro_proposal,
+        )
+        logger.info(
+            "Stage4 token | used=%d | baseline=%d | efficiency_ratio=%.3f | efficiency_score=%.3f | macro_bonus=%.3f",
+            token_cost.tokens_used,
+            token_cost.baseline_tokens,
+            token_cost.efficiency_ratio,
+            token_cost.efficiency_score,
+            token_cost.macro_bonus,
+        )
+    else:
+        logger.info("Stage4 token | skipped due to incomplete slots")
 
     # 5. reward_calculation(...)
     final_reward = reward_calculation(plan_accuracy, token_cost)

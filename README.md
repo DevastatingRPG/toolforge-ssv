@@ -20,3 +20,6 @@ You can run the environment server locally using the configured script:
 ```bash
 uv run --project . server
 ```
+
+## Future
+- **Macro Descriptions**: Currently, the evaluation pipeline expands macro calls into their atomic components before semantic validation because macros do not yet carry their own functional descriptions. In future iterations, the LLM agent will be enabled to define macros with explicit descriptions, allowing the evaluator to judge them directly as unified semantic units.

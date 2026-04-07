@@ -39,9 +39,6 @@ class Tool(BaseModel):
     # Flag indicating whether this tool is a macro (composed of smaller tools)
     is_macro: bool = False
     
-    # The base token cost to use this tool
-    token_cost: int
-    
     # Optional list of tool names this macro is composed of
     steps: Optional[List[ToolCall]] = None
 

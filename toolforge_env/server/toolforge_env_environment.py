@@ -87,9 +87,6 @@ class ToolforgeEnvironment(Environment):
     # Hard guardrail to ensure episodes terminate deterministically.
     MAX_EPISODE_STEPS: int = 100
 
-    # Deterministic fallback cost for unknown tool calls.
-    UNKNOWN_TOOL_CALL_TOKEN_COST: int = 20
-
     def __init__(self, task_selector: TaskSelector, input_provider_factory):
         """Initialize the toolforge_env environment."""
         super().__init__(transform=None, rubric=None)
@@ -153,14 +150,15 @@ class ToolforgeEnvironment(Environment):
             "name": tool.name,
             "description": tool.description,
             "is_macro": tool.is_macro,
-            "token_cost": tool.token_cost,
             "steps": tool.steps or [],
         }
 
     def _available_tools_to_prompt_specs(self, tools: List[Tool]) -> List[Dict[str, Any]]:
-        """Convert available tools to plain dictionaries ready for prompt injection."""
-
-        return [self._tool_to_prompt_spec(tool) for tool in tools]
+        """Convert available tools to plain dictionaries ready for prompt injection.
+        Macros are listed first, followed by atomic tools.
+        """
+        sorted_tools = sorted(tools, key=lambda t: not t.is_macro)
+        return [self._tool_to_prompt_spec(tool) for tool in sorted_tools]
 
     def reset(        
             self, 
@@ -175,8 +173,13 @@ class ToolforgeEnvironment(Environment):
         Returns:
             ToolforgeObservation with a ready message
         """
-        # Use provided episode_id or generate a new one
         ep_id = episode_id if episode_id is not None else str(uuid4())
+
+        # old state preservation
+        prev_accepted_macros = self._state.accepted_macros if hasattr(self, '_state') else []
+        prev_macro_defs = self._state.macro_definitions if hasattr(self, '_state') else {}
+        prev_rejected_count = self._state.rejected_macro_count if hasattr(self, '_state') else 0
+
         self._state = self._create_default_state()
         self._state.episode_id = ep_id
         self._reset_count += 1
@@ -198,16 +201,16 @@ class ToolforgeEnvironment(Environment):
         self._state.current_task = first_task
         self._sync_task_queue_from_generator()
         self._state.completed_tasks = []
-        self._state.available_tools = build_atomic_tools()
-        self._state.accepted_macros = []
-        self._state.rejected_macro_count = 0
+        self._state.available_tools = build_atomic_tools() + prev_accepted_macros
+        self._state.accepted_macros = prev_accepted_macros
+        self._state.rejected_macro_count = prev_rejected_count
         self._state.call_history = []
         self._state.tokens_used = 0
         self._state.done = False
         # Reset episode-level macro tracking state
         self._state.sequence_counts = {}
         self._state.macro_usage_counts = {}
-        self._state.macro_definitions = {}
+        self._state.macro_definitions = prev_macro_defs
         self._last_approval = None
 
 
@@ -274,12 +277,12 @@ class ToolforgeEnvironment(Environment):
 
         self._state.step_count += 1
 
-        token_accounting = self._compute_plan_token_cost(action.plan)
-        step_token_cost = token_accounting["step_token_cost"]
-        unknown_tool_calls = token_accounting["unknown_tool_calls"]
+        plan_accounting = self._analyze_plan(action.plan)
+        step_call_count = plan_accounting["step_call_count"]
+        unknown_tool_calls = plan_accounting["unknown_tool_calls"]
 
         self._state.call_history.extend(action.plan)
-        self._state.tokens_used += step_token_cost
+        self._state.tokens_used += step_call_count
 
         available_tools_by_name = {
             tool.name: tool for tool in self._state.available_tools
@@ -342,7 +345,7 @@ class ToolforgeEnvironment(Environment):
                 "macro_name": macro_result["name"],
                 "macro_reason": macro_result["reason"],
                 "accepted_macro_count": len(self._state.accepted_macros),
-                "step_token_cost": step_token_cost,
+                "step_call_count": step_call_count,
                 "token_accounting_source": "tool_registry",
                 "unknown_tool_calls": unknown_tool_calls,
                 "last_approval": self._last_approval,
@@ -376,26 +379,21 @@ class ToolforgeEnvironment(Environment):
         logger.debug("Next task prompt: %s", next_task.prompt)
         return True
 
-    def _compute_plan_token_cost(self, plan: List[ToolCall]) -> Dict[str, Any]:
-        """Compute deterministic token accounting from server-side tool registry."""
+    def _analyze_plan(self, plan: List[ToolCall]) -> Dict[str, Any]:
+        """Compute deterministic call accounting from server-side tool registry."""
 
         available_tools_by_name = {
             tool.name: tool for tool in self._state.available_tools
         }
         unknown_tool_calls: List[str] = []
-        step_token_cost = 0
 
         for call in plan:
             tool_def = available_tools_by_name.get(call.tool_name)
             if tool_def is None:
-                step_token_cost += self.UNKNOWN_TOOL_CALL_TOKEN_COST
                 unknown_tool_calls.append(call.tool_name)
-                continue
-
-            step_token_cost += tool_def.token_cost
 
         return {
-            "step_token_cost": step_token_cost,
+            "step_call_count": len(plan),
             "unknown_tool_calls": unknown_tool_calls,
         }
 
@@ -504,18 +502,12 @@ class ToolforgeEnvironment(Environment):
             )
 
         composed_of: List[str] = [call.tool_name for call in proposal.steps]
-        atomic_cost_total = sum(
-            available_tools_by_name[tool_name].token_cost
-            for tool_name in composed_of
-        )
-
-        macro_token_cost = max(1, atomic_cost_total - 2)
 
         macro_tool = Tool(
             name=macro_name,
             description=proposal.description.strip() or f"Macro: {' -> '.join(composed_of)}",
             is_macro=True,
-            token_cost=macro_token_cost,
+            steps=proposal.steps,
         )
 
         self._state.accepted_macros.append(macro_tool)
@@ -526,12 +518,11 @@ class ToolforgeEnvironment(Environment):
 
         result["decision"] = "approved"
         result["name"] = macro_name
-        result["reason"] = f"macro_registered_token_cost:{macro_token_cost}"
+        result["reason"] = "macro_registered"
         logger.info(
-            "Macro approved: name='%s', steps=%s, token_cost=%d",
+            "Macro approved: name='%s', steps=%s",
             macro_name,
             composed_of,
-            macro_token_cost,
         )
         return result
 
