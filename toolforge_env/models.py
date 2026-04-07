@@ -12,13 +12,15 @@ The toolforge_env environment is a simple test environment that echoes back mess
 
 from openenv.core.env_server.types import Action, Observation, State
 from typing import Any, Dict, List, Literal, Optional, Tuple
-from pydantic import Field, BaseModel, model_validator
+from pydantic import Field, BaseModel, ConfigDict, model_validator
 
 class ToolCall(BaseModel):
     """
     Represents a single invocation of a tool.
-    It encapsulates the tool's identity, the arguments provided, and the cost in tokens.
+    It encapsulates the tool's identity and the arguments provided.
     """
+    model_config = ConfigDict(extra="forbid")
+
     # Name of the tool being called
     tool_name: str    
 
@@ -36,9 +38,6 @@ class Tool(BaseModel):
     
     # Flag indicating whether this tool is a macro (composed of smaller tools)
     is_macro: bool = False
-    
-    # The base token cost to use this tool
-    token_cost: int
     
     # Optional list of tool names this macro is composed of
     steps: Optional[List[ToolCall]] = None
@@ -278,11 +277,11 @@ class PipelineResult(BaseModel):
     validation: ValidationResult
     # Stage-2 slot judgment (None when validation fails)
     slot_judgment: Optional[SlotJudgmentResult] = None
-    # Stage-3 plan accuracy (None when validation fails or harmful)
+    # Stage-3 plan accuracy (deprecated, kept for compatibility)
     plan_accuracy: Optional[PlanAccuracyResult] = None
-    # Stage-4 token cost (None when validation fails or harmful)
+    # Stage-4 token cost (deprecated, kept for compatibility)
     token_cost: Optional[TokenCostResult] = None
-    # Final blended score clamped to [-1.0, 1.0]
+    # Final blended score clamped to [-0.2, 1.0]
     reward: float
     # Whether the plan passed structural validation
     passed_validation: bool
