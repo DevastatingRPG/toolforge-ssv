@@ -182,7 +182,7 @@ class ToolforgeEnvironment(Environment):
         self._state = self._create_default_state()
         self._state.episode_id = ep_id
         self._reset_count += 1
-        self.task_id = kwargs.get("difficulty", "task_id")
+        self.task_id = kwargs.get("task_id", "easy-deployment-sprints")
 
         # subsequent resets ignore incoming values
         task_list = self._task_selector.next_task_list(self.task_id)
