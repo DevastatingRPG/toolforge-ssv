@@ -15,8 +15,8 @@ Short-circuits if validation fails, or if harmful calls are present.
 
 from typing import Dict, List, Optional
 
-from toolforge_env.models import MacroProposal, PipelineResult, Task, Tool, ToolCall
-from toolforge_env.server.plan_evaluator import (
+from models import PipelineResult, Task, Tool, ToolCall
+from server.plan_evaluator import (
     get_relevant_slots,
     plan_accuracy_score,
     reward_calculation,

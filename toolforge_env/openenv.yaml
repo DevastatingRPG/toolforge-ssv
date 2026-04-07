@@ -4,4 +4,11 @@ type: space
 runtime: fastapi
 app: server.app:app
 port: 8000
+tasks:
+  - id: easy-deployment-sprints
+    description: "Repetitive service rollout and validation cycles"
+  - id: medium-traffic-readiness
+    description: "Preparing services for specific traffic goals"
+  - id: hard-project-legacy-migration
+    description: "Project: Decommissioning Legacy Data Center to Cloud"
 

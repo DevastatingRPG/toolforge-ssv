@@ -4,7 +4,7 @@ from server.inputs.factory import create_input_provider
 
 def create_env() -> ToolforgeEnvironment:
     # mode unknown yet → placeholder
-    selector = TaskSelector(mode="eval")
+    selector = TaskSelector()
 
     return ToolforgeEnvironment(
         task_selector=selector,

@@ -57,8 +57,8 @@ API_KEY = os.getenv("HF_TOKEN") or os.getenv("API_KEY")
 
 API_BASE_URL = os.getenv("API_BASE_URL") or "https://router.huggingface.co/v1"
 MODEL_NAME = os.getenv("MODEL_NAME") or "Qwen/Qwen2.5-72B-Instruct"
-TASK_NAME = os.getenv("MY_ENV_V4_TASK", "echo")
-BENCHMARK = os.getenv("MY_ENV_V4_BENCHMARK", "my_env_v4")
+TASK_NAME = os.getenv("MY_ENV_V4_TASK", "easy-deployment-sprints")
+BENCHMARK = os.getenv("MY_ENV_V4_BENCHMARK", "toolforge_env")
 MAX_STEPS = 8
 TEMPERATURE = 0.7
 MAX_TOKENS = 500
@@ -172,7 +172,7 @@ async def main() -> None:
     log_start(task=TASK_NAME, env=BENCHMARK, model=MODEL_NAME)
 
     try:
-        result = await env.reset(task=TASK_NAME, mode="eval", difficulty="medium") # OpenENV.reset()
+        result = await env.reset(task_id=TASK_NAME) # OpenENV.reset()
         obs = result.observation
         task = obs.current_task
         available_tools = obs.available_tools
