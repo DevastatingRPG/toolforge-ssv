@@ -45,7 +45,7 @@ FINAL_REWARD_MAX = 1.0
 VALIDATION_PENALTY = -0.2
 
 # Stage 2: Slot score bounds
-SLOT_THRESHOLD = 0.7
+SLOT_THRESHOLD = 0.65
 SLOT_SCORE_MIN = -0.15   # slot_ratio == 0.0
 SLOT_SCORE_MAX = 0.25    # slot_ratio == 1.0
 
@@ -54,7 +54,7 @@ MACRO_CREATION_MAX = 0.20
 MACRO_CREATION_DECAY_FLOOR = 0.05
 MACRO_CREATION_THRESHOLD = 2
 MACRO_CREATION_FULL_RANGE = {2, 3}  # counts that get full reward
-MACRO_USAGE_PARTIAL = 0.03   # when 0.7 <= slot_ratio < 1.0
+MACRO_USAGE_PARTIAL = 0.03   # when 0.65 <= slot_ratio < 1.0
 MACRO_USAGE_FULL = 0.05      # when slot_ratio == 1.0
 
 # Stage 4: Tool efficiency bounds
@@ -292,14 +292,14 @@ def update_sequence_counts(
 def compute_slot_score(slot_ratio: float) -> float:
     """Stage 2: Piecewise linear slot score bounded to [-0.15, 0.25].
     
-    - slot_ratio < 0.7:  maps [-0.15, 0.0]
-    - slot_ratio >= 0.7: maps [0.0,  0.25]
+    - slot_ratio < 0.65:  maps [-0.15, 0.0]
+    - slot_ratio >= 0.65: maps [0.0,  0.25]
     """
     if slot_ratio < SLOT_THRESHOLD:
-        # linear from -0.15 (at 0.0) to 0.0 (at 0.7)
+        # linear from -0.15 (at 0.0) to 0.0 (at 0.65)
         return SLOT_SCORE_MIN * (1.0 - slot_ratio / SLOT_THRESHOLD)
     else:
-        # linear from 0.0 (at 0.7) to 0.25 (at 1.0)
+        # linear from 0.0 (at 0.65) to 0.25 (at 1.0)
         return SLOT_SCORE_MAX * ((slot_ratio - SLOT_THRESHOLD) / (1.0 - SLOT_THRESHOLD))
 
 
@@ -310,7 +310,7 @@ def compute_macro_creation_bonus(
 ) -> float:
     """Stage 3a: Macro creation bonus bounded to [0.0, 0.20].
     
-    Gate: slot_ratio >= 0.7
+    Gate: slot_ratio >= 0.65
     - prior_count < 2: 0.0
     - prior_count in {2, 3}: 0.20
     - prior_count > 3: decays with floor 0.05
@@ -340,7 +340,7 @@ def compute_macro_usage_bonus(
 ) -> float:
     """Stage 3b: Macro usage bonus bounded to [0.0, 0.05].
     
-    Gate: slot_ratio >= 0.7
+    Gate: slot_ratio >= 0.65
     """
     if slot_ratio < SLOT_THRESHOLD:
         return 0.0

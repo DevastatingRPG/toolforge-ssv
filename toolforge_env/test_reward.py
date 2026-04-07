@@ -1,5 +1,4 @@
-from __future__ import annotations
-
+import os
 import json
 import logging
 from datetime import datetime
@@ -11,7 +10,24 @@ from server.inputs.factory import create_input_provider
 from server.inputs.simulated.task_selector import TaskSelector
 from server.toolforge_env_environment import ToolforgeEnvironment
 
+# Check for LLM credentials in the environment
+HF_TOKEN = os.getenv("HF_TOKEN")
+API_BASE = os.getenv("API_BASE_URL", "https://router.huggingface.co/v1")
+MODEL_ID = os.getenv("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")
+
 logger = logging.getLogger(__name__)
+
+def check_llm_status():
+    if HF_TOKEN:
+        print(f"--- LLM CONFIG DETECTED ---")
+        print(f"  Target: {API_BASE}")
+        print(f"  Model:  {MODEL_ID}")
+        print(f"  Mode:   LIVE LLM EVALUATION")
+    else:
+        print(f"--- LLM CONFIG MISSING ---")
+        print(f"  HF_TOKEN not found in environment.")
+        print(f"  Mode:   SIMULATED EVALUATION (FALLBACK)")
+    print("-" * 30)
 
 
 def configure_logging() -> Path:
@@ -319,6 +335,7 @@ def run_episode(
 
 
 def main() -> None:
+    check_llm_status()
     log_path = configure_logging()
     banner("REWARD TEST HARNESS START")
     logger.info("This harness focuses on reward-relevant scenarios and logs all step/observation details.")
