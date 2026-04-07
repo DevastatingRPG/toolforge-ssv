@@ -6,11 +6,10 @@ Thin orchestration layer that chains the plan evaluation logic.
 Pipeline flow:
 1. run_sanity_validation(...)
 2. run_slot_judgment(...)
-3. plan_accuracy_score(...)
-4. run_token_calculation(...)
-5. reward_calculation(...)
+3. compute_step_reward(...)  — slot score + macro bonuses + efficiency
 
 Short-circuits if validation fails, or if harmful calls are present.
+Final reward is bounded to [-0.2, 1.0].
 """
 
 import logging
@@ -21,11 +20,11 @@ from typing import Dict, List, Optional
 from toolforge_env.models import MacroProposal, PipelineResult, Task, Tool, ToolCall
 from toolforge_env.server.plan_evaluator import (
     get_relevant_slots,
-    plan_accuracy_score,
-    reward_calculation,
     run_sanity_validation,
     run_slot_judgment,
-    run_token_calculation,
+    compute_step_reward,
+    VALIDATION_PENALTY,
+    FINAL_REWARD_MIN,
 )
 
 
@@ -95,14 +94,14 @@ def run_evaluation_pipeline(
     )
 
     if not validation.valid:
-        logger.info("Pipeline end (validation short-circuit) | reward=%.3f", validation.penalty)
+        logger.info("Pipeline end (validation short-circuit) | reward=%.3f", VALIDATION_PENALTY)
         # short-circuit immediately
         return PipelineResult(
             validation=validation,
             slot_judgment=None,
             plan_accuracy=None,
             token_cost=None,
-            reward=validation.penalty,
+            reward=VALIDATION_PENALTY,
             passed_validation=False,
             summary=f"Validation failed: {validation.reason}",
         )
@@ -124,65 +123,63 @@ def run_evaluation_pipeline(
     )
     
     if slot_judgment.harmful_calls_present:
-        logger.info("Pipeline end (harmful short-circuit) | reward=-1.000")
+        logger.info("Pipeline end (harmful short-circuit) | reward=%.3f", FINAL_REWARD_MIN)
         # short-circuit immediately
         return PipelineResult(
             validation=validation,
             slot_judgment=slot_judgment,
             plan_accuracy=None,
             token_cost=None,
-            reward=-1.0,
+            reward=FINAL_REWARD_MIN,
             passed_validation=True,
             summary="Harmful tool call detected.",
         )
 
-    # 3. plan_accuracy_score(...)
-    plan_accuracy = plan_accuracy_score(
-        validation_result=validation,
+    # 3. Compute step reward (slot score + macro bonuses + efficiency)
+    reward_breakdown = compute_step_reward(
         slot_judgment=slot_judgment,
         task=task,
-        goal_achieved=goal_achieved,
+        plan=plan,
+        available_tools=available_tools,
+        accepted_macros=accepted_macros,
+        macro_proposal=macro_proposal,
+        sequence_counts=sequence_counts,
+    )
+
+    slot_ratio = reward_breakdown["slot_ratio"]
+    slot_score = reward_breakdown["slot_score"]
+    macro_creation = reward_breakdown["macro_creation"]
+    macro_usage = reward_breakdown["macro_usage"]
+    efficiency_score = reward_breakdown["efficiency_score"]
+    final_reward = reward_breakdown["final_reward"]
+
+    logger.info(
+        "Stage2 slot_score | slot_ratio=%.3f | slot_score=%.3f",
+        slot_ratio,
+        slot_score,
     )
     logger.info(
-        "Stage3 plan_accuracy | ratio=%.3f | slot_score=%.3f | unnecessary_penalty=%.3f | score=%.3f",
-        plan_accuracy.slot_completion_ratio,
-        plan_accuracy.slot_score,
-        plan_accuracy.unnecessary_penalty,
-        plan_accuracy.score,
+        "Stage3 macro_bonuses | macro_creation=%.3f | macro_usage=%.3f",
+        macro_creation,
+        macro_usage,
     )
-
-    # 4. run_token_calculation(...)
-    token_cost = None
-    if slot_judgment.task_complete:
-        token_cost = run_token_calculation(
-            plan=plan,
-            accepted_macros=accepted_macros,
-            task=task,
-            available_tools=available_tools,
-            sequence_counts=sequence_counts,
-            macro_definitions=macro_definitions,
-            macro_proposal=macro_proposal,
-        )
+    if slot_ratio >= 1.0:
         logger.info(
-            "Stage4 token | used=%d | baseline=%d | efficiency_ratio=%.3f | efficiency_score=%.3f | macro_bonus=%.3f",
-            token_cost.tokens_used,
-            token_cost.baseline_tokens,
-            token_cost.efficiency_ratio,
-            token_cost.efficiency_score,
-            token_cost.macro_bonus,
+            "Stage4 efficiency | used=%d | baseline=%d | efficiency_score=%.3f",
+            len(plan),
+            task.baseline_call_count,
+            efficiency_score,
         )
     else:
-        logger.info("Stage4 token | skipped due to incomplete slots")
+        logger.info("Stage4 efficiency | skipped (slot_ratio=%.3f < 1.0)", slot_ratio)
 
-    # 5. reward_calculation(...)
-    final_reward = reward_calculation(plan_accuracy, token_cost)
-    logger.info("Stage5 reward | final_reward=%.3f", final_reward)
+    logger.info("Stage5 final_reward | final_reward=%.3f", final_reward)
 
     return PipelineResult(
         validation=validation,
         slot_judgment=slot_judgment,
-        plan_accuracy=plan_accuracy,
-        token_cost=token_cost,
+        plan_accuracy=None,
+        token_cost=None,
         reward=final_reward,
         passed_validation=True,
         summary="Plan validated, slots judged, final reward applied.",

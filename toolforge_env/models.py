@@ -277,11 +277,11 @@ class PipelineResult(BaseModel):
     validation: ValidationResult
     # Stage-2 slot judgment (None when validation fails)
     slot_judgment: Optional[SlotJudgmentResult] = None
-    # Stage-3 plan accuracy (None when validation fails or harmful)
+    # Stage-3 plan accuracy (deprecated, kept for compatibility)
     plan_accuracy: Optional[PlanAccuracyResult] = None
-    # Stage-4 token cost (None when validation fails or harmful)
+    # Stage-4 token cost (deprecated, kept for compatibility)
     token_cost: Optional[TokenCostResult] = None
-    # Final blended score clamped to [-1.0, 1.0]
+    # Final blended score clamped to [-0.2, 1.0]
     reward: float
     # Whether the plan passed structural validation
     passed_validation: bool
