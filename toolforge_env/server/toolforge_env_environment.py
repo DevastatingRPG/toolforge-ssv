@@ -21,9 +21,11 @@ from typing import Any, Dict, List, Optional
 try:
     from .inputs.base import InputProvider
     from .inputs.simulated.task_selector import TaskSelector
+    from .inputs.factory import create_input_provider
 except ImportError:
     from server.inputs.base import InputProvider
     from server.inputs.simulated.task_selector import TaskSelector
+    from server.inputs.factory import create_input_provider
 
 try:
     from ..models import (
@@ -33,7 +35,6 @@ try:
         ToolforgeObservation,
         ToolForgeState,
         Task,
-        ValidationResult
     )
 except ImportError:
     from models import (
@@ -43,18 +44,15 @@ except ImportError:
         ToolforgeObservation,
         ToolForgeState,
         Task,
-        ValidationResult
     )
 
 try:
     from server.tools import build_atomic_tools
     from server.evaluation_pipeline import run_evaluation_pipeline
-    from server.inputs.simulated.data_loader import SimulatedDataLoader
     from server.plan_evaluator import update_sequence_counts
 except ImportError:
     from .tools import build_atomic_tools
     from .evaluation_pipeline import run_evaluation_pipeline
-    from .inputs.simulated.data_loader import SimulatedDataLoader
     from .plan_evaluator import update_sequence_counts
 
 
@@ -87,13 +85,14 @@ class ToolforgeEnvironment(Environment):
     # Hard guardrail to ensure episodes terminate deterministically.
     MAX_EPISODE_STEPS: int = 100
 
-    def __init__(self, task_selector: TaskSelector, input_provider_factory):
+    def __init__(self):
         """Initialize the toolforge_env environment."""
         super().__init__(transform=None, rubric=None)
         self._state = self._create_default_state()
         self._reset_count = 0
 
-        self._input_provider_factory = input_provider_factory
+        self._task_selector = TaskSelector()
+        self._input_provider_factory = create_input_provider
         self._input_provider: Optional[InputProvider] = None
         self._last_approval: Optional[bool] = None
 
@@ -183,18 +182,10 @@ class ToolforgeEnvironment(Environment):
         self._state = self._create_default_state()
         self._state.episode_id = ep_id
         self._reset_count += 1
-
-        if not self.initialized:
-            self.mode = kwargs.get("mode", "eval")
-            self.difficulty = kwargs.get("difficulty", "easy")
-
-            from server.inputs.simulated.task_selector import TaskSelector
-            self.task_selector = TaskSelector(mode=self.mode)
-
-            self.initialized = True
+        self.task_id = kwargs.get("task_id", "easy-deployment-sprints")
 
         # subsequent resets ignore incoming values
-        task_list = self.task_selector.next_task_list(self.difficulty)
+        task_list = self._task_selector.next_task_list(self.task_id)
 
         self._input_provider = self._input_provider_factory(task_list)
         first_task = self._get_next_task_from_generator()
@@ -217,12 +208,6 @@ class ToolforgeEnvironment(Environment):
         obs = self._create_default_observation()
         obs.done = False
         obs.reward = 0.0
-        obs.metadata = {
-            "summary": "Episode initialized.",
-            "task_prompt": first_task.prompt,
-            "task_level": first_task.difficulty,
-            "progression": "episode_started",
-        }
 
         return obs
 

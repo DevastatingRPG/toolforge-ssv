@@ -17,8 +17,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from toolforge_env.models import MacroProposal, PipelineResult, Task, Tool, ToolCall
-from toolforge_env.server.plan_evaluator import (
+from models import PipelineResult, Task, Tool, ToolCall
+from server.plan_evaluator import (
     get_relevant_slots,
     run_sanity_validation,
     run_slot_judgment,

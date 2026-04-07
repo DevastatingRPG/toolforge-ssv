@@ -1,12 +1,8 @@
 from models import Task
 
-# ======================== EASY TASKS ========================
-# Focus: High repetition of patterns (Action -> Verify -> Notify) 
-# to incentivize tool reuse and automation scripts.
-
-EASY_TASKS = [
+TASKS = [
     {
-        "list_id": "easy-deployment-sprints",
+        "task_id": "easy-deployment-sprints",
         "description": "Repetitive service rollout and validation cycles",
         "tasks": [
             Task(id="e-dep-1", prompt="Deploy 'web-app' v1.1, check health, and notify #ops-chat.", difficulty="easy", required_slots=["deployment_execution", "deployment_verification", "deployment_notification"], baseline_call_count=3),
@@ -19,7 +15,7 @@ EASY_TASKS = [
         ]
     },
     {
-        "list_id": "easy-resource-management",
+        "task_id": "easy-resource-management",
         "description": "Standard scaling and restart procedures",
         "tasks": [
             Task(id="e-res-1", prompt="Scale 'worker-pool' to 5, check health, and notify #infra.", difficulty="easy", required_slots=["scaling_execution", "scaling_verification", "scaling_notification"], baseline_call_count=3),
@@ -32,7 +28,7 @@ EASY_TASKS = [
         ]
     },
     {
-        "list_id": "easy-rollback-drills",
+        "task_id": "easy-rollback-drills",
         "description": "Repetitive rollback patterns for quick reversion practice",
         "tasks": [
             Task(id="e-roll-1", prompt="Rollback 'user-profile' service to previous version, verify health, and notify #ops-alerts.", difficulty="easy", required_slots=["rollback_execution", "rollback_verification", "rollback_notification"], baseline_call_count=3),
@@ -42,16 +38,9 @@ EASY_TASKS = [
             Task(id="e-roll-5", prompt="Rollback 'oauth-provider', verify it is stable, and alert #security-logs.", difficulty="easy", required_slots=["rollback_execution", "rollback_verification", "rollback_notification"], baseline_call_count=3),
             Task(id="e-roll-6", prompt="Revert 'marketing-landing-page', check health, and notify #growth-team.", difficulty="easy", required_slots=["rollback_execution", "rollback_verification", "rollback_notification"], baseline_call_count=3),
         ]
-    }
-]
-
-# ======================== MEDIUM TASKS ========================
-# Focus: Goal-oriented prompts where the tool sequence is derived 
-# from the business objective (e.g., Cost, Performance, Safety).
-
-MEDIUM_TASKS = [
+    },
     {
-        "list_id": "medium-traffic-readiness",
+        "task_id": "medium-traffic-readiness",
         "description": "Preparing services for specific traffic goals",
         "tasks": [
             Task(id="m-tr-1", prompt="Prepare for the 9AM traffic spike: Scale 'gateway-api' to 15 replicas and confirm stability.", difficulty="medium", required_slots=["scaling_execution", "scaling_verification"], baseline_call_count=2),
@@ -64,7 +53,7 @@ MEDIUM_TASKS = [
         ]
     },
     {
-        "list_id": "medium-incident-response",
+        "task_id": "medium-incident-response",
         "description": "Goal-driven mitigation of active system anomalies",
         "tasks": [
             Task(id="m-inc-1", prompt="Users are getting 502s from 'api-gateway'. Restart the gateway nodes, check if health improves, and notify #incident-room.", difficulty="medium", required_slots=["restart_execution", "restart_verification", "restart_notification"], baseline_call_count=3),
@@ -75,16 +64,9 @@ MEDIUM_TASKS = [
             Task(id="m-inc-6", prompt="'cache-layer' is serving stale data. Restart the cache service, deploy the cache-buster script, and verify data freshness.", difficulty="medium", required_slots=["restart_execution", "deployment_execution", "deployment_verification"], baseline_call_count=3),
             Task(id="m-inc-7", prompt="Payment timeout alerts triggered. Rollback the last update to 'stripe-connector', check health, and update #finance-alerts.", difficulty="medium", required_slots=["rollback_execution", "rollback_verification", "rollback_notification"], baseline_call_count=3),
         ]
-    }
-]
-
-# ======================== HARD TASKS ========================
-# Focus: End-to-end Project Lifecycle. These collections follow 
-# chronological phases of complex architectural projects.
-
-HARD_TASKS = [
+    },
     {
-        "list_id": "hard-project-legacy-migration",
+        "task_id": "hard-project-legacy-migration",
         "description": "Project: Decommissioning Legacy Data Center to Cloud",
         "tasks": [
             Task(id="h-mig-1", prompt="Phase 1: Deploy 'cloud-connector-v1' and scale it to 20 replicas to handle initial data sync. Verify the connection health and notify #migration-hq.", difficulty="hard", required_slots=["deployment_execution", "scaling_execution", "deployment_verification", "deployment_notification"], baseline_call_count=4),
@@ -97,7 +79,7 @@ HARD_TASKS = [
         ]
     },
     {
-        "list_id": "hard-project-zero-trust",
+        "task_id": "hard-project-zero-trust",
         "description": "Project: Zero-Trust Security Mesh Implementation",
         "tasks": [
             Task(id="h-sec-1", prompt="Phase 1: Deploy 'envoy-sidecar-injector' to the cluster. Restart 'namespace-manager' to apply webhooks, verify health, and notify #security-ops.", difficulty="hard", required_slots=["deployment_execution", "restart_execution", "deployment_verification", "deployment_notification"], baseline_call_count=4),
@@ -109,9 +91,3 @@ HARD_TASKS = [
         ]
     }
 ]
-
-TASKS_BY_DIFFICULTY = {
-    "easy": EASY_TASKS,
-    "medium": MEDIUM_TASKS,
-    "hard": HARD_TASKS,
-}
