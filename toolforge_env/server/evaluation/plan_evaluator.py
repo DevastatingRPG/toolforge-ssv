@@ -29,6 +29,10 @@ from server.evaluation.llm_eval_prompts import (
     SLOT_JUDGE_SYSTEM_PROMPT,
     build_slot_judge_user_prompt,
 )
+from server.evaluation.tool_slot_mappings import (
+    TOOL_TO_POSSIBLE_SLOTS,
+    HARMFUL_TOOLS_TO_REQUIRED_SLOT,
+)
 from server.slots import DEVOPS_SLOTS
 
 logger = logging.getLogger(__name__)
@@ -157,6 +161,48 @@ def _call_llm_slot_judgment(
     content = completion.choices[0].message.content or "{}"
     content = content.strip().replace("```json", "").replace("```", "").strip()
     return json.loads(content)
+
+def _fallback_parse_plan_to_llm_summary(
+    expanded_plan: List[ToolCall],
+    required_slots: List[str],
+) -> Dict[str, Any]:
+    """Rule-based fallback semantic parser when LLM judge fails."""
+    slots_filled = []
+    unnecessary_calls = []
+    harmful_calls = []
+    
+    filled_so_far = set()
+    
+    for call in expanded_plan:
+        tool_name = call.tool_name
+        possible_slots = TOOL_TO_POSSIBLE_SLOTS.get(tool_name, [])
+        
+        filled_any = False
+        for slot in possible_slots:
+            if slot in required_slots and slot not in filled_so_far:
+                slots_filled.append(slot)
+                filled_so_far.add(slot)
+                filled_any = True
+                break
+                
+        if not filled_any:
+            if tool_name in HARMFUL_TOOLS_TO_REQUIRED_SLOT:
+                req_slot = HARMFUL_TOOLS_TO_REQUIRED_SLOT[tool_name]
+                if req_slot not in required_slots:
+                    harmful_calls.append(tool_name)
+                else:
+                    unnecessary_calls.append(tool_name)
+            else:
+                unnecessary_calls.append(tool_name)
+                
+    slots_missing = [s for s in required_slots if s not in filled_so_far]
+    
+    return {
+        "slots_filled": slots_filled,
+        "slots_missing": slots_missing,
+        "unnecessary_calls": unnecessary_calls,
+        "harmful_calls": harmful_calls
+    }
 
 def _parse_llm_judgment(raw_json: Dict[str, Any], required_slots: List[str]) -> SlotJudgmentResult:
     """Convert the flat LLM summary output into a SlotJudgmentResult.
@@ -298,7 +344,7 @@ def compute_macro_usage_bonus(
     if not macro_used:
         return 0.0
 
-    if slot_ratio >= 1.0:
+    if slot_ratio == 1.0:
         return MACRO_USAGE_FULL
     return MACRO_USAGE_PARTIAL
 
@@ -408,15 +454,10 @@ def run_slot_judgment(
         except Exception as exc:
             logger.warning("LLM slot judge attempt %d/%d failed: %s", attempt + 1, max_attempts, exc)
             if attempt == max_attempts - 1:
-                logger.error("LLM slot judge failed after %d attempts. Returning safe failure.", max_attempts)
-                return SlotJudgmentResult(
-                    evaluations=[],
-                    slots_filled=[],
-                    slots_missing=required_slots,
-                    task_complete=False,
-                    harmful_calls_present=False,
-                    judge_failed=True,
-                )
+                logger.error("LLM slot judge failed after %d attempts. Activating fallback parser.", max_attempts)
+                expanded_plan = _expand_macros_in_plan(plan, available_tools)
+                raw_json = _fallback_parse_plan_to_llm_summary(expanded_plan, required_slots)
+                break
 
     result = _parse_llm_judgment(raw_json, required_slots)
     if result.harmful_calls_present:
