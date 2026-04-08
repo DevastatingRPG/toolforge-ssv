@@ -50,12 +50,12 @@ except ImportError:
 
 try:
     from server.tools import build_atomic_tools
-    from server.evaluation_pipeline import run_evaluation_pipeline
-    from server.plan_evaluator import update_sequence_counts
+    from server.evaluation.pipeline import run_evaluation_pipeline
+    from server.evaluation.plan_evaluator import update_sequence_counts
 except ImportError:
     from .tools import build_atomic_tools
-    from .evaluation_pipeline import run_evaluation_pipeline
-    from .plan_evaluator import update_sequence_counts
+    from .evaluation.pipeline import run_evaluation_pipeline
+    from .evaluation.plan_evaluator import update_sequence_counts
 
 
 logger = logging.getLogger(__name__)
