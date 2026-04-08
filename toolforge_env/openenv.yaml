@@ -4,4 +4,11 @@ type: space
 runtime: fastapi
 app: server.app:app
 port: 8000
+tasks:
+	- id: task_easy
+		grader: graders:EasyGrader
+	- id: task_medium
+		grader: graders:MediumGrader
+	- id: task_hard
+		grader: graders:HardGrader
 
