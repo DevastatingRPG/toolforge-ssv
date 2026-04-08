@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 from models import PipelineResult, Task, Tool, ToolCall
-from server.plan_evaluator import (
+from server.evaluation.plan_evaluator import (
     get_relevant_slots,
     run_sanity_validation,
     run_slot_judgment,
@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 
 def _ensure_reward_file_logger() -> None:
     """Attach a file handler once so pipeline logs are persisted under reward_logs/."""
-    log_dir = Path(__file__).resolve().parents[1] / "reward_logs"
+    log_dir = Path(__file__).resolve().parents[2] / "reward_logs"
     log_dir.mkdir(parents=True, exist_ok=True)
 
     # Reuse any existing pipeline reward file handler.
@@ -95,7 +95,6 @@ def run_evaluation_pipeline(
 
     if not validation.valid:
         logger.info("Pipeline end (validation short-circuit) | reward=%.3f", VALIDATION_PENALTY)
-        # short-circuit immediately
         return PipelineResult(
             validation=validation,
             slot_judgment=None,
@@ -130,7 +129,6 @@ def run_evaluation_pipeline(
     
     if slot_judgment.harmful_calls_present:
         logger.info("Pipeline end (harmful short-circuit) | reward=%.3f", FINAL_REWARD_MIN)
-        # short-circuit immediately
         return PipelineResult(
             validation=validation,
             slot_judgment=slot_judgment,
@@ -142,6 +140,24 @@ def run_evaluation_pipeline(
             step_slot_ratio=0.0,
             step_task_complete=False,
             step_harmful=True,
+            step_macro_creation_bonus=0.0,
+            step_macro_usage_bonus=0.0,
+            step_efficiency_score=0.0,
+        )
+
+    if getattr(slot_judgment, "judge_failed", False):
+        logger.error("Pipeline end (judge failed short-circuit) | reward=0.000")
+        return PipelineResult(
+            validation=validation,
+            slot_judgment=slot_judgment,
+            plan_accuracy=None,
+            token_cost=None,
+            reward=0.0,
+            passed_validation=True,
+            summary="Semantic judge unavailable / LLM failure",
+            step_slot_ratio=0.0,
+            step_task_complete=False,
+            step_harmful=False,
             step_macro_creation_bonus=0.0,
             step_macro_usage_bonus=0.0,
             step_efficiency_score=0.0,

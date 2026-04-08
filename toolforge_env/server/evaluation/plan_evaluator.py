@@ -1,14 +1,12 @@
 """
 Plan Evaluator
 
-Consolidates the core evaluation logic:
-1. Structural validation
-2. Semantic slot judgment
-3. Reward calculation
-4. Token-cost calculation
-5. Final score combination
-
-Functions are pure and deterministic where possible.
+Core evaluation logic for the ToolForge environment:
+  Stage 1: Structural validation
+  Stage 2: Semantic slot judgment (LLM-based with retry + fallback)
+  Stage 3: Macro bonuses (creation + usage)
+  Stage 4: Tool efficiency scoring
+  Final:   Bounded reward combination
 """
 
 import logging
@@ -27,15 +25,19 @@ from models import (
     ToolEvaluation,
     ValidationResult,
 )
-from server.llm_eval_prompts import (
+from server.evaluation.llm_eval_prompts import (
     SLOT_JUDGE_SYSTEM_PROMPT,
     build_slot_judge_user_prompt,
+)
+from server.evaluation.tool_slot_mappings import (
+    TOOL_TO_POSSIBLE_SLOTS,
+    HARMFUL_TOOLS_TO_REQUIRED_SLOT,
 )
 from server.slots import DEVOPS_SLOTS
 
 logger = logging.getLogger(__name__)
 
-# --- Named Constants (New Bounded Reward Design) ---
+# --- Named Constants (Bounded Reward Design) ---
 
 # Final reward bounds
 FINAL_REWARD_MIN = -0.2
@@ -68,65 +70,8 @@ API_BASE_URL = os.getenv("API_BASE_URL", "https://router.huggingface.co/v1")
 MODEL_NAME = os.getenv("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")
 HF_TOKEN = os.getenv("HF_TOKEN", "")
 
-# --- Helper Functions for Stage 2 (Semantic Judge) ---
 
-def _build_judge_request(
-    task_prompt: str,
-    required_slots: List[str],
-    slot_definitions: Dict[str, str],
-    available_tools: List[Tool],
-    plan: List[ToolCall],
-) -> Dict[str, Any]:
-    """Helper to build the expected LLM judge prompt/input."""
-    # Placeholder structure for when real call is integrated
-    return {
-        "task_prompt": task_prompt,
-        "required_slots": required_slots,
-        "slot_definitions": slot_definitions,
-        "tools": [t.name for t in available_tools],
-        "plan": [{"tool": c.tool_name} for c in plan]
-    }
-
-def _simulate_llm_judgment(
-    judge_request: Dict[str, Any],
-    plan: List[ToolCall],
-    required_slots: List[str]
-) -> List[Dict[str, Any]]:
-    """Helper to simulate the LLM response deterministically.
-    
-    Produces classification: 'relevant', 'unnecessary', or 'harmful'.
-    """
-    results = []
-    slots_filled_so_far = set()
-    
-    # We simulate semantic relevance by simply mapping the sequence
-    # to the required slots.
-    for i, call in enumerate(plan):
-        # Extremely naive heuristic for simulation:
-        if call.tool_name == "delete" or "drop" in call.tool_name:
-            # Simulate a harmful destructive call
-            classification = "harmful"
-            slot = None
-        else:
-            # If we haven't filled all slots and it's not a duplicate, let's pretend it fills a slot
-            if len(slots_filled_so_far) < len(required_slots):
-                slot = required_slots[len(slots_filled_so_far)]
-                classification = "relevant"
-                slots_filled_so_far.add(slot)
-            else:
-                slot = None
-                classification = "unnecessary"
-                
-        results.append({
-            "tool_call_index": i,
-            "tool_name": call.tool_name,
-            "fills_slot": slot,
-            "classification": classification,
-            "reason": f"Simulated classification: {classification}"
-        })
-        
-    return results
-
+# ─── Stage 2 Helpers: Semantic Judge ─────────────────────────────────────────
 
 def _call_llm_slot_judgment(
     task_prompt: str,
@@ -137,9 +82,8 @@ def _call_llm_slot_judgment(
 ) -> Dict[str, Any]:
     """Call the OpenAI-compatible LLM and return its JSON response."""
     client = OpenAI(base_url=API_BASE_URL, api_key=HF_TOKEN or None)
-    # Map tool names to descriptions for the prompt
     tool_desc_map = {t.name: t.description for t in available_tools}
-    
+
     plan_with_descs = []
     for call in plan:
         desc = tool_desc_map.get(call.tool_name, "No description available.")
@@ -169,10 +113,52 @@ def _call_llm_slot_judgment(
     content = content.strip().replace("```json", "").replace("```", "").strip()
     return json.loads(content)
 
-def _parse_llm_judgment(raw_json: Dict[str, Any], required_slots: List[str]) -> SlotJudgmentResult:
-    """Helper to convert the flat LLM summary output into a SlotJudgmentResult.
+def _fallback_parse_plan_to_llm_summary(
+    expanded_plan: List[ToolCall],
+    required_slots: List[str],
+) -> Dict[str, Any]:
+    """Rule-based fallback semantic parser when LLM judge fails."""
+    slots_filled = []
+    unnecessary_calls = []
+    harmful_calls = []
     
-    The expected LLM schema is:
+    filled_so_far = set()
+    
+    for call in expanded_plan:
+        tool_name = call.tool_name
+        possible_slots = TOOL_TO_POSSIBLE_SLOTS.get(tool_name, [])
+        
+        filled_any = False
+        for slot in possible_slots:
+            if slot in required_slots and slot not in filled_so_far:
+                slots_filled.append(slot)
+                filled_so_far.add(slot)
+                filled_any = True
+                break
+                
+        if not filled_any:
+            if tool_name in HARMFUL_TOOLS_TO_REQUIRED_SLOT:
+                req_slot = HARMFUL_TOOLS_TO_REQUIRED_SLOT[tool_name]
+                if req_slot not in required_slots:
+                    harmful_calls.append(tool_name)
+                else:
+                    unnecessary_calls.append(tool_name)
+            else:
+                unnecessary_calls.append(tool_name)
+                
+    slots_missing = [s for s in required_slots if s not in filled_so_far]
+    
+    return {
+        "slots_filled": slots_filled,
+        "slots_missing": slots_missing,
+        "unnecessary_calls": unnecessary_calls,
+        "harmful_calls": harmful_calls
+    }
+
+def _parse_llm_judgment(raw_json: Dict[str, Any], required_slots: List[str]) -> SlotJudgmentResult:
+    """Convert the flat LLM summary output into a SlotJudgmentResult.
+
+    Expected LLM schema:
     {
         "slots_filled": ["SLOT_NAME"],
         "slots_missing": ["SLOT_NAME"],
@@ -182,25 +168,20 @@ def _parse_llm_judgment(raw_json: Dict[str, Any], required_slots: List[str]) -> 
     """
     slots_filled = raw_json.get("slots_filled", [])
     slots_missing = raw_json.get("slots_missing", [])
-    
-    # Validation against the requested required_slots
+
     # Ensure slots_filled only contains requested slots
     slots_filled = [s for s in slots_filled if s in required_slots]
-    
-    # If missing is not explicitly provided, we compute it
+
     if not slots_missing:
         slots_missing = [s for s in required_slots if s not in slots_filled]
-        
+
     harmful_calls = raw_json.get("harmful_calls", [])
     harmful_calls_present = len(harmful_calls) > 0
-    
+
     task_complete = len(slots_missing) == 0
-    
-    # Create minimal ToolEvaluation entries if we have names, but since we lost the 
-    # tool_call_index in the summary, we maintain an empty list for the model requirement.
-    # The current reward logic only depends on individual slot filling counts.
+
     evaluations = []
-    
+
     return SlotJudgmentResult(
         evaluations=evaluations,
         slots_filled=slots_filled,
@@ -209,53 +190,20 @@ def _parse_llm_judgment(raw_json: Dict[str, Any], required_slots: List[str]) -> 
         harmful_calls_present=harmful_calls_present,
     )
 
-def _simulate_llm_judgment(
-    judge_request: Dict[str, Any],
-    plan: List[ToolCall],
-    required_slots: List[str]
-) -> Dict[str, Any]:
-    """Helper to simulate the LLM response in the flat summary format.
-    
-    Returns the same schema as defined in SLOT_JUDGE_SYSTEM_PROMPT.
-    """
-    slots_filled = []
-    harmful_calls = []
-    unnecessary_calls = []
-    
-    slots_filled_so_far = set()
-    
-    for call in plan:
-        # Heuristic for simulation
-        if "delete" in call.tool_name or "drop" in call.tool_name:
-            harmful_calls.append(call.tool_name)
-        elif len(slots_filled_so_far) < len(required_slots):
-            slot = required_slots[len(slots_filled_so_far)]
-            slots_filled.append(slot)
-            slots_filled_so_far.add(slot)
-        else:
-            unnecessary_calls.append(call.tool_name)
-            
-    return {
-        "slots_filled": slots_filled,
-        "slots_missing": [s for s in required_slots if s not in slots_filled],
-        "unnecessary_calls": unnecessary_calls,
-        "harmful_calls": harmful_calls
-    }
 
-# --- Helper Function for Stage 4 (Dynamic Baseline) ---
+# ─── Stage 4 Helper: Dynamic Baseline ───────────────────────────────────────
 
 def calculate_dynamic_baseline_tokens(task: Task, available_tools: Dict[str, Tool]) -> int:
-    """Computes the expected baseline token cost for a task.
+    """Compute the expected baseline token cost for a task.
 
-    Slot-driven baseline: uses baseline_token_cost when provided,
-    otherwise falls back to baseline_call_count for compatibility.
+    Uses baseline_call_count when provided, otherwise returns 0.
     """
     if task.baseline_call_count > 0:
         return task.baseline_call_count
-
     return 0
 
-# --- Helper Functions for Macro Recognition ---
+
+# ─── Macro Recognition Helpers ───────────────────────────────────────────────
 
 def extract_contiguous_windows(tool_names: List[str], window_size: int) -> List[Tuple[str, ...]]:
     """Return exact ordered contiguous windows of the given size."""
@@ -276,7 +224,7 @@ def update_sequence_counts(
     sequence_counts: Dict[str, int],
 ) -> Dict[str, int]:
     """Update sequence_counts dict from the current plan's contiguous windows.
-    
+
     Extracts windows of size 2..len(plan) and increments counts.
     Returns the updated dict (mutates in place for convenience).
     """
@@ -287,19 +235,18 @@ def update_sequence_counts(
             sequence_counts[key] = sequence_counts.get(key, 0) + 1
     return sequence_counts
 
-# --- New Bounded Stage Scoring Functions ---
+
+# ─── Stage Scoring Functions ─────────────────────────────────────────────────
 
 def compute_slot_score(slot_ratio: float) -> float:
     """Stage 2: Piecewise linear slot score bounded to [-0.15, 0.25].
-    
+
     - slot_ratio < 0.65:  maps [-0.15, 0.0]
     - slot_ratio >= 0.65: maps [0.0,  0.25]
     """
     if slot_ratio < SLOT_THRESHOLD:
-        # linear from -0.15 (at 0.0) to 0.0 (at 0.65)
         return SLOT_SCORE_MIN * (1.0 - slot_ratio / SLOT_THRESHOLD)
     else:
-        # linear from 0.0 (at 0.65) to 0.25 (at 1.0)
         return SLOT_SCORE_MAX * ((slot_ratio - SLOT_THRESHOLD) / (1.0 - SLOT_THRESHOLD))
 
 
@@ -309,7 +256,7 @@ def compute_macro_creation_bonus(
     slot_ratio: float,
 ) -> float:
     """Stage 3a: Macro creation bonus bounded to [0.0, 0.20].
-    
+
     Gate: slot_ratio >= 0.65
     - prior_count < 2: 0.0
     - prior_count in {2, 3}: 0.20
@@ -329,7 +276,6 @@ def compute_macro_creation_bonus(
         return 0.0
     if prior_count in MACRO_CREATION_FULL_RANGE:
         return MACRO_CREATION_MAX
-    # Decay for late creation
     return max(MACRO_CREATION_DECAY_FLOOR, MACRO_CREATION_MAX * (3.0 / prior_count))
 
 
@@ -339,7 +285,7 @@ def compute_macro_usage_bonus(
     slot_ratio: float,
 ) -> float:
     """Stage 3b: Macro usage bonus bounded to [0.0, 0.05].
-    
+
     Gate: slot_ratio >= 0.65
     """
     if slot_ratio < SLOT_THRESHOLD:
@@ -349,7 +295,7 @@ def compute_macro_usage_bonus(
     if not macro_used:
         return 0.0
 
-    if slot_ratio >= 1.0:
+    if slot_ratio == 1.0:
         return MACRO_USAGE_FULL
     return MACRO_USAGE_PARTIAL
 
@@ -360,7 +306,7 @@ def compute_efficiency_score(
     available_tools: Dict[str, Tool],
 ) -> float:
     """Stage 4: Count-based efficiency score bounded to [0.0, 0.5].
-    
+
     Only called when slot_ratio == 1.0.
     - baseline match -> 0.2
     - better than baseline -> above 0.2
@@ -377,7 +323,7 @@ def compute_efficiency_score(
     return max(EFFICIENCY_SCORE_MIN, min(EFFICIENCY_SCORE_MAX, score))
 
 
-# --- Public APIs ---
+# ─── Public APIs ─────────────────────────────────────────────────────────────
 
 def get_relevant_slots(required_slots: List[str]) -> Dict[str, str]:
     """Return the subset of DEVOPS_SLOTS matching required_slots."""
@@ -392,7 +338,7 @@ def run_sanity_validation(
     available_tools: Dict[str, Tool],
 ) -> ValidationResult:
     """Stage 1: Structural validation of the plan.
-    
+
     Validation order:
       1. Empty plan            → EMPTY_PLAN    (penalty -0.2)
       2. Unknown tool name     → INVALID_TOOL  (penalty -0.2)
@@ -421,15 +367,14 @@ def _expand_macros_in_plan(plan: List[ToolCall], available_tools: List[Tool]) ->
     """Recursively expand macro calls into their atomic components for semantic evaluation."""
     tool_map = {t.name: t for t in available_tools}
     expanded_plan = []
-    
+
     for call in plan:
         tool = tool_map.get(call.tool_name)
         if tool and tool.is_macro and tool.steps:
-            # Macros are typically 1-level, but we expand recursively for robustness
             expanded_plan.extend(_expand_macros_in_plan(tool.steps, available_tools))
         else:
             expanded_plan.append(call)
-            
+
     return expanded_plan
 
 def run_slot_judgment(
@@ -440,30 +385,33 @@ def run_slot_judgment(
     plan: List[ToolCall],
 ) -> SlotJudgmentResult:
     """Stage 2: Evaluate a validated plan against the task's semantic slots."""
-    
-    # Expand macros into atomic steps so the LLM evaluator can use tool descriptions
-    # expanded_plan = _expand_macros_in_plan(plan, available_tools)
-    # logger.debug(f"Stage 2 expansion: original_len={len(plan)}, expanded_len={len(expanded_plan)}")
 
-    req = _build_judge_request(task_prompt, required_slots, slot_definitions, available_tools, plan)
-    try:
-        raw_json = _call_llm_slot_judgment(
-            task_prompt=task_prompt,
-            required_slots=required_slots,
-            slot_definitions=slot_definitions,
-            available_tools=available_tools,
-            plan=plan,
-        )
-        if not raw_json or "slots_filled" not in raw_json:
-            raise ValueError("LLM returned an invalid or empty response")
-    except Exception as exc:
-        logger.warning("LLM slot judge failed, falling back to simulated judgment: %s", exc)
-        raw_json = _simulate_llm_judgment(req, plan, required_slots)
-    
+    max_attempts = 3
+    raw_json = None
+    for attempt in range(max_attempts):
+        try:
+            raw_json = _call_llm_slot_judgment(
+                task_prompt=task_prompt,
+                required_slots=required_slots,
+                slot_definitions=slot_definitions,
+                available_tools=available_tools,
+                plan=plan,
+            )
+            if not raw_json or "slots_filled" not in raw_json:
+                raise ValueError("LLM returned an invalid or empty response")
+            break  # Success
+        except Exception as exc:
+            logger.warning("LLM slot judge attempt %d/%d failed: %s", attempt + 1, max_attempts, exc)
+            if attempt == max_attempts - 1:
+                logger.error("LLM slot judge failed after %d attempts. Activating fallback parser.", max_attempts)
+                expanded_plan = _expand_macros_in_plan(plan, available_tools)
+                raw_json = _fallback_parse_plan_to_llm_summary(expanded_plan, required_slots)
+                break
+
     result = _parse_llm_judgment(raw_json, required_slots)
     if result.harmful_calls_present:
         logger.warning("Slot judge detected harmful calls in plan.")
-        
+
     return result
 
 
@@ -477,32 +425,25 @@ def compute_step_reward(
     sequence_counts: Optional[Dict[str, int]] = None,
 ) -> Dict[str, float]:
     """Compute the full step reward using bounded additive stages.
-    
+
     Returns a dict with per-stage contributions and the final clamped reward.
     """
-    # Compute slot ratio
     n_required = len(task.required_slots)
     n_filled = len(slot_judgment.slots_filled)
     slot_ratio = n_filled / n_required if n_required > 0 else 1.0
 
-    # Stage 2: slot score
     slot_score = compute_slot_score(slot_ratio)
 
-    # Stage 3: macro bonuses (gated by slot_ratio)
     macro_creation = compute_macro_creation_bonus(macro_proposal, sequence_counts, slot_ratio)
     macro_usage = compute_macro_usage_bonus(plan, accepted_macros, slot_ratio)
 
-    # Stage 4: efficiency (only when fully complete)
     efficiency_score = 0.0
 
     if slot_ratio < SLOT_THRESHOLD:
-        # Only slot score, no macro, no efficiency
         final_raw = slot_score
     elif slot_ratio < 1.0:
-        # Slot score + macro bonuses only
         final_raw = slot_score + macro_creation + macro_usage
     else:
-        # Full: slot + macro + efficiency
         efficiency_score = compute_efficiency_score(plan, task, available_tools)
         final_raw = slot_score + macro_creation + macro_usage + efficiency_score
 

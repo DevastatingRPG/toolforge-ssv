@@ -57,10 +57,10 @@ API_KEY = os.getenv("HF_TOKEN") or os.getenv("API_KEY")
 API_BASE_URL = os.getenv("API_BASE_URL") or "https://router.huggingface.co/v1"
 MODEL_NAME = os.getenv("MODEL_NAME") or "Qwen/Qwen2.5-72B-Instruct"
 BENCHMARK = os.getenv("MY_ENV_V4_BENCHMARK", "toolforge_env")
-MAX_STEPS = 8
-TEMPERATURE = 0.7
+MAX_STEPS = 20
+TEMPERATURE = 0.0
 MAX_TOKENS = 500
-SUCCESS_SCORE_THRESHOLD = 0.1  # normalized score in [0, 1]
+SUCCESS_SCORE_THRESHOLD = 0.6  # normalized score in [0, 1]
 
 TASKS = [
     "easy",

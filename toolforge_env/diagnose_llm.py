@@ -22,7 +22,7 @@ load_env()
 
 # Import after setting env vars
 try:
-    from server.plan_evaluator import (
+    from server.evaluation.plan_evaluator import (
         _call_llm_slot_judgment, 
         run_slot_judgment,
         API_BASE_URL, 

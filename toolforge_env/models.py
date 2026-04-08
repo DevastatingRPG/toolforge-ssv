@@ -271,6 +271,9 @@ class SlotJudgmentResult(BaseModel):
     # Flag set if any tool call was classified as harmful
     harmful_calls_present: bool
 
+    # Flag set if the live LLM judge failed after all retries
+    judge_failed: bool = False
+
 
 class TokenCostResult(BaseModel):
     """Output of the Stage-4 token-cost calculator."""
