@@ -104,6 +104,12 @@ def run_evaluation_pipeline(
             reward=VALIDATION_PENALTY,
             passed_validation=False,
             summary=f"Validation failed: {validation.reason}",
+            step_slot_ratio=0.0,
+            step_task_complete=False,
+            step_harmful=False,
+            step_macro_creation_bonus=0.0,
+            step_macro_usage_bonus=0.0,
+            step_efficiency_score=0.0,
         )
 
     # 2. run_slot_judgment(...)
@@ -133,6 +139,12 @@ def run_evaluation_pipeline(
             reward=FINAL_REWARD_MIN,
             passed_validation=True,
             summary="Harmful tool call detected.",
+            step_slot_ratio=0.0,
+            step_task_complete=False,
+            step_harmful=True,
+            step_macro_creation_bonus=0.0,
+            step_macro_usage_bonus=0.0,
+            step_efficiency_score=0.0,
         )
 
     # 3. Compute step reward (slot score + macro bonuses + efficiency)
@@ -183,4 +195,10 @@ def run_evaluation_pipeline(
         reward=final_reward,
         passed_validation=True,
         summary="Plan validated, slots judged, final reward applied.",
+        step_slot_ratio=slot_ratio,
+        step_task_complete=slot_judgment.task_complete,
+        step_harmful=False,
+        step_macro_creation_bonus=macro_creation,
+        step_macro_usage_bonus=macro_usage,
+        step_efficiency_score=efficiency_score,
     )

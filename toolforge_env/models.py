@@ -135,6 +135,42 @@ class ToolforgeObservation(Observation):
     )
 
 
+class EpisodeGradingState(BaseModel):
+    """Aggregate episode-level signals consumed by the grader.
+    
+    Accumulated incrementally during the episode by the environment.
+    Read by the grader at episode end to compute a normalized score.
+    """
+    # Total steps taken in this episode
+    episode_steps: int = 0
+    # Steps where structural validation failed
+    validation_failures: int = 0
+    # Steps where harmful tool calls were detected
+    harmful_plan_count: int = 0
+    # Steps with full slot completion AND passed validation
+    correct_plan_count: int = 0
+    # Steps where efficiency was computed (slot_ratio == 1.0)
+    fully_correct_efficiency_opportunities: int = 0
+    # Sum of efficiency scores across fully-correct steps
+    sum_efficiency_score: float = 0.0
+    # Times the agent attempted to create a macro
+    macro_creation_attempts: int = 0
+    # Times macro creation was approved by the environment
+    macro_creation_approved: int = 0
+    # Approved AND plan was semantically valid
+    macro_creation_correct: int = 0
+    # Sum of macro creation bonuses awarded
+    macro_creation_bonus_total: float = 0.0
+    # Steps where any accepted macro was used in the plan
+    macro_usage_attempts: int = 0
+    # Macro used AND slot_ratio >= threshold
+    macro_usage_correct: int = 0
+    # Times macro creation was rejected
+    macro_rejected_count: int = 0
+    # Total tasks completed by episode end
+    final_completed_tasks: int = 0
+
+
 class ToolForgeState(State):
     """
     The internal State class for the ToolForge environment.
@@ -176,6 +212,9 @@ class ToolForgeState(State):
 
     # Macro name -> ordered atomic tool names it represents
     macro_definitions: Dict[str, List[str]] = Field(default_factory=dict)
+
+    # Episode-level grading accumulator (reset each episode)
+    grading: EpisodeGradingState = Field(default_factory=EpisodeGradingState)
 
 
 class PlanAccuracyResult(BaseModel):
@@ -287,6 +326,14 @@ class PipelineResult(BaseModel):
     passed_validation: bool
     # Human-readable one-line summary
     summary: str
+
+    # --- Grader-facing step facts (set by pipeline, consumed by environment) ---
+    step_slot_ratio: Optional[float] = None
+    step_task_complete: Optional[bool] = None
+    step_harmful: Optional[bool] = None
+    step_macro_creation_bonus: Optional[float] = None
+    step_macro_usage_bonus: Optional[float] = None
+    step_efficiency_score: Optional[float] = None
 
 
 
