@@ -35,6 +35,7 @@ try:
         ToolforgeObservation,
         ToolForgeState,
         Task,
+        EpisodeGradingState,
     )
 except ImportError:
     from models import (
@@ -44,6 +45,7 @@ except ImportError:
         ToolforgeObservation,
         ToolForgeState,
         Task,
+        EpisodeGradingState,
     )
 
 try:
@@ -204,6 +206,9 @@ class ToolforgeEnvironment(Environment):
         self._state.macro_definitions = prev_macro_defs
         self._last_approval = None
 
+        # Fresh episode-level grading accumulator
+        self._state.grading = EpisodeGradingState()
+
 
         obs = self._create_default_observation()
         obs.done = False
@@ -238,6 +243,10 @@ class ToolforgeEnvironment(Environment):
             )
             self._state.step_count += 1
             self._last_approval = False
+
+            # Track malformed actions in grading state
+            self._state.grading.episode_steps += 1
+            self._state.grading.validation_failures += 1
 
             progression = "advanced_to_next_task_malformed_action"
             if self._state.step_count >= self.MAX_EPISODE_STEPS:
@@ -312,6 +321,9 @@ class ToolforgeEnvironment(Environment):
         if macro_result["decision"] == "approved" and action.macro_proposal is not None:
             self._state.available_tools.append(action.macro_proposal)
 
+        # Accumulate grading state from this step
+        self._update_grading_state(pipeline_result, macro_result, action)
+
         # Fetch the scalar reward from the evaluation pipeline
         reward = float(pipeline_result.reward)
         print(self._state.current_task.prompt, reward, progression, macro_result)
@@ -349,6 +361,56 @@ class ToolforgeEnvironment(Environment):
         )
         logger.debug("Next task prompt: %s", next_task.prompt)
         return True
+
+    def _update_grading_state(
+        self,
+        pipeline_result,
+        macro_result: Dict[str, Any],
+        action: ToolforgeAction,
+    ) -> None:
+        """Accumulate episode-level grading counters from a single step."""
+        g = self._state.grading
+        g.episode_steps += 1
+
+        # Validation failures
+        if not pipeline_result.passed_validation:
+            g.validation_failures += 1
+
+        # Harmful calls
+        if pipeline_result.step_harmful:
+            g.harmful_plan_count += 1
+
+        # Correct plans (full slot fill + valid)
+        if pipeline_result.step_task_complete and pipeline_result.passed_validation:
+            g.correct_plan_count += 1
+
+        # Efficiency tracking (only when slot_ratio == 1.0)
+        sr = pipeline_result.step_slot_ratio
+        if sr is not None and sr >= 1.0:
+            g.fully_correct_efficiency_opportunities += 1
+            g.sum_efficiency_score += (pipeline_result.step_efficiency_score or 0.0)
+
+        # Macro creation tracking
+        if macro_result["attempted"]:
+            g.macro_creation_attempts += 1
+            if macro_result["decision"] == "approved":
+                g.macro_creation_approved += 1
+                if pipeline_result.passed_validation:
+                    g.macro_creation_correct += 1
+                g.macro_creation_bonus_total += (pipeline_result.step_macro_creation_bonus or 0.0)
+            elif macro_result["decision"] == "rejected":
+                g.macro_rejected_count += 1
+
+        # Macro usage tracking
+        macro_names = {m.name for m in self._state.accepted_macros}
+        if any(c.tool_name in macro_names for c in action.plan):
+            g.macro_usage_attempts += 1
+            if sr is not None and sr >= 0.65:
+                g.macro_usage_correct += 1
+
+        # Keep completed task count current
+        g.final_completed_tasks = len(self._state.completed_tasks)
+
 
     def _analyze_plan(self, plan: List[ToolCall]) -> Dict[str, Any]:
         """Compute deterministic call accounting from server-side tool registry."""
