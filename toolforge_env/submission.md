@@ -113,22 +113,22 @@ toolforge_env/
 +-- models.py
 +-- README.md
 +-- submission.md
-+-- test_reward.py
 +-- server/
-�   +-- app.py
-�   +-- graders.py
-�   +-- tools.py
-�   +-- slots.py
-�   +-- toolforge_env_environment.py
-�   +-- evaluation/
-�   �   +-- __init__.py
-�   �   +-- pipeline.py
-�   �   +-- plan_evaluator.py
-�   �   +-- llm_eval_prompts.py
-�   +-- inputs/
-�       +-- simulated/
-�           +-- tasks.py
-�           +-- task_selector.py
+   +-- app.py
+   +-- graders.py
+   +-- tools.py
+   +-- slots.py
+   +-- toolforge_env_environment.py
+   +-- evaluation/
+      +-- __init__.py
+      +-- pipeline.py
+      +-- plan_evaluator.py
+      +-- llm_eval_prompts.py
+      +-- tool_slot_mappings.py
+   +-- inputs/
+       +-- simulated/
+           +-- tasks.py
+           +-- task_selector.py
 ```
 
 ### Important Modules
@@ -154,8 +154,6 @@ toolforge_env/
   - benchmark task banks for easy, medium, and hard internal groups
 - `server/inputs/simulated/task_selector.py`
   - deterministic mapping from benchmark task ids to internal task lists
-- `test_reward.py`
-  - local reward harness for inspecting step-level evaluation behavior
 
 ## Core Data Models
 The project uses `models.py` as the shared contract layer.
@@ -330,7 +328,7 @@ These lines encode:
 - final score.
 
 ## Reward Philosophy
-ToolForge�s reward design is built around a simple principle:
+ToolForge's reward design is built around a simple principle:
 - correctness first,
 - abstraction second,
 - efficiency third,
@@ -355,6 +353,7 @@ This stage evaluates:
 - which required semantic slots were filled,
 - the resulting `slot_ratio`,
 - whether harmful or harmless calls were made.
+- Incase LLM call fails _fallback_parse_plan_to_llm_summary is called as a backup slot evaluator.
 
 #### Harmful Calls
 A harmful call is a tool call that is semantically dangerous in the context of the task. It is not merely irrelevant; it represents an action that can actively move the system in the wrong direction.
@@ -513,37 +512,6 @@ Locally, grader behavior can be tested by exercising completed episode outputs a
 - edge cases still clamp correctly,
 - no path returns exact `0.0` or `1.0`.
 
-## Testing and Validation
-ToolForge includes local utilities for reward and task validation.
-
-### Local Reward Testing
-`test_reward.py` is used to inspect reward behavior across representative scenarios. This includes:
-- malformed actions,
-- partial slot filling,
-- macro proposal paths,
-- macro usage paths,
-- end-to-end step reward logging.
-
-### Task Validation
-The repository also includes helpers such as task-generation and validation scripts to check that task banks remain structurally consistent with:
-- tool availability,
-- semantic slots,
-- baseline call counts.
-
-### Submission Validation Concerns
-Before submission, the project was checked for:
-- manifest structure,
-- presence of benchmark tasks with graders,
-- inference stdout contract,
-- score clamping requirements,
-- server import paths,
-- benchmark task selection.
-
-### Grader Testing Intention
-The grader is treated as a separate benchmark component and should be tested independently from step reward logic. This includes:
-- ensuring callable discovery from `openenv.yaml`,
-- validating score clamping,
-- ensuring edge cases never return exact `0.0` or `1.0`.
 
 ## Future Work
 The current implementation is a strong proof of concept, but several improvements are intentionally left for future iterations.
