@@ -208,7 +208,6 @@ def get_model_action(
         return ToolforgeAction(**json.loads(raw))
 
     except Exception as e:
-        print(f"Error occurred: {e}")
         return build_fallback_action(available_tools, current_task)
 
 
