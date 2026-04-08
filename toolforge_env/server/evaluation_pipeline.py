@@ -147,6 +147,24 @@ def run_evaluation_pipeline(
             step_efficiency_score=0.0,
         )
 
+    if getattr(slot_judgment, "judge_failed", False):
+        logger.error("Pipeline end (judge failed short-circuit) | reward=0.000")
+        return PipelineResult(
+            validation=validation,
+            slot_judgment=slot_judgment,
+            plan_accuracy=None,
+            token_cost=None,
+            reward=0.0,
+            passed_validation=True,
+            summary="Semantic judge unavailable / LLM failure",
+            step_slot_ratio=0.0,
+            step_task_complete=False,
+            step_harmful=False,
+            step_macro_creation_bonus=0.0,
+            step_macro_usage_bonus=0.0,
+            step_efficiency_score=0.0,
+        )
+
     # 3. Compute step reward (slot score + macro bonuses + efficiency)
     reward_breakdown = compute_step_reward(
         slot_judgment=slot_judgment,

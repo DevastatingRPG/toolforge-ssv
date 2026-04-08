@@ -446,19 +446,33 @@ def run_slot_judgment(
     # logger.debug(f"Stage 2 expansion: original_len={len(plan)}, expanded_len={len(expanded_plan)}")
 
     req = _build_judge_request(task_prompt, required_slots, slot_definitions, available_tools, plan)
-    try:
-        raw_json = _call_llm_slot_judgment(
-            task_prompt=task_prompt,
-            required_slots=required_slots,
-            slot_definitions=slot_definitions,
-            available_tools=available_tools,
-            plan=plan,
-        )
-        if not raw_json or "slots_filled" not in raw_json:
-            raise ValueError("LLM returned an invalid or empty response")
-    except Exception as exc:
-        logger.warning("LLM slot judge failed, falling back to simulated judgment: %s", exc)
-        raw_json = _simulate_llm_judgment(req, plan, required_slots)
+    
+    max_attempts = 3
+    raw_json = None
+    for attempt in range(max_attempts):
+        try:
+            raw_json = _call_llm_slot_judgment(
+                task_prompt=task_prompt,
+                required_slots=required_slots,
+                slot_definitions=slot_definitions,
+                available_tools=available_tools,
+                plan=plan,
+            )
+            if not raw_json or "slots_filled" not in raw_json:
+                raise ValueError("LLM returned an invalid or empty response")
+            break  # Success
+        except Exception as exc:
+            logger.warning("LLM slot judge attempt %d/%d failed: %s", attempt + 1, max_attempts, exc)
+            if attempt == max_attempts - 1:
+                logger.error("LLM slot judge failed after %d attempts. Returning safe failure.", max_attempts)
+                return SlotJudgmentResult(
+                    evaluations=[],
+                    slots_filled=[],
+                    slots_missing=required_slots,
+                    task_complete=False,
+                    harmful_calls_present=False,
+                    judge_failed=True,
+                )
     
     result = _parse_llm_judgment(raw_json, required_slots)
     if result.harmful_calls_present:

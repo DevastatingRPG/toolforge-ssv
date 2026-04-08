@@ -318,8 +318,7 @@ class ToolforgeEnvironment(Environment):
             reject_reason="plan_not_accepted",
         )
 
-        if macro_result["decision"] == "approved" and action.macro_proposal is not None:
-            self._state.available_tools.append(action.macro_proposal)
+        # Note: the macro is added to self._state.available_tools inside _process_macro_proposal()
 
         # Accumulate grading state from this step
         self._update_grading_state(pipeline_result, macro_result, action)
