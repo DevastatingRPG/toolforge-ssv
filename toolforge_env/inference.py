@@ -44,7 +44,6 @@ STDOUT FORMAT
 import asyncio
 import json
 import os
-import pprint
 import textwrap
 from typing import List, Optional, Dict, Any
 
@@ -57,12 +56,17 @@ API_KEY = os.getenv("HF_TOKEN") or os.getenv("API_KEY")
 
 API_BASE_URL = os.getenv("API_BASE_URL") or "https://router.huggingface.co/v1"
 MODEL_NAME = os.getenv("MODEL_NAME") or "Qwen/Qwen2.5-72B-Instruct"
-TASK_NAME = os.getenv("MY_ENV_V4_TASK", "easy-deployment-sprints")
 BENCHMARK = os.getenv("MY_ENV_V4_BENCHMARK", "toolforge_env")
 MAX_STEPS = 8
 TEMPERATURE = 0.7
 MAX_TOKENS = 500
 SUCCESS_SCORE_THRESHOLD = 0.1  # normalized score in [0, 1]
+
+TASKS = [
+    "easy",
+    "medium",
+    "hard",
+]
 
 # Max possible reward: each token contributes 0.1, across all steps
 _MAX_REWARD_PER_STEP = MAX_TOKENS * 0.1
@@ -122,6 +126,18 @@ def log_step(step: int, action: str, reward: float, done: bool, error: Optional[
 def log_end(success: bool, steps: int, score: float, rewards: List[float]) -> None:
     rewards_str = ",".join(f"{r:.2f}" for r in rewards)
     print(f"[END] success={str(success).lower()} steps={steps} score={score:.3f} rewards={rewards_str}", flush=True)
+
+
+def get_task_list() -> List[str]:
+    raw_tasks = os.getenv("MY_ENV_V4_TASKS", "")
+    if raw_tasks.strip():
+        return [task.strip() for task in raw_tasks.split(",") if task.strip()]
+
+    single_task = os.getenv("MY_ENV_V4_TASK", "")
+    if single_task.strip():
+        return [single_task.strip()]
+
+    return TASKS
 
 
 def build_user_prompt(step: int, current_task: Any, available_tools: List[Dict[str, Any]], last_reward: float, history: List[str]) -> str:
@@ -188,14 +204,12 @@ def get_model_action(
         )
         raw = completion.choices[0].message.content
         if raw is None:
-            print(f"[DEBUG] Model returned None content")
             return build_fallback_action(available_tools, current_task)
         raw = raw.strip()
         raw = raw.replace("```json", "").replace("```", "").strip()
         return ToolforgeAction(**json.loads(raw))
 
-    except Exception as exc:
-        print(f"[DEBUG] Model request failed: {exc}", flush=True)
+    except Exception:
         return build_fallback_action(available_tools, current_task)
 
 
@@ -203,67 +217,69 @@ async def main() -> None:
     client = OpenAI(base_url=API_BASE_URL, api_key=API_KEY)
 
     env = await ToolforgeEnv.from_docker_image(IMAGE_NAME)
-
-    history: List[str] = []
-    rewards: List[float] = []
-    steps_taken = 0
-    score = 0.0
-    success = False
-
-    log_start(task=TASK_NAME, env=BENCHMARK, model=MODEL_NAME)
+    task_list = get_task_list()
 
     try:
-        result = await env.reset(task_id=TASK_NAME) # OpenENV.reset()
-        obs = result.observation
-        task = obs.current_task
-        available_tools = obs.available_tools
-        # history = obs.history
-        history = [
-            f"EpisodeStart|task_id {getattr(task, 'id', 'unknown')}|difficulty {getattr(task, 'difficulty', 'unknown')}|prompt {getattr(task, 'prompt', '')}"
-        ]
-        last_reward = 0.0
+        for task_name in task_list:
+            history: List[str] = []
+            rewards: List[float] = []
+            steps_taken = 0
+            score = 0.0
+            success = False
 
-        for step in range(1, MAX_STEPS + 1):
-            if result.done:
-                break
+            log_start(task=task_name, env=BENCHMARK, model=MODEL_NAME)
 
-            action = get_model_action(client, step, task.prompt, available_tools, last_reward, history)
-            result = await env.step(action)
-            obs = result.observation
-            task = obs.current_task
-            available_tools = obs.available_tools
+            try:
+                result = await env.reset(task_id=task_name) # OpenENV.reset()
+                obs = result.observation
+                task = obs.current_task
+                available_tools = obs.available_tools
+                history = [
+                    f"EpisodeStart|task_id {getattr(task, 'id', 'unknown')}|difficulty {getattr(task, 'difficulty', 'unknown')}|prompt {getattr(task, 'prompt', '')}"
+                ]
+                last_reward = 0.0
 
-            reward = result.reward or 0.0
-            done = result.done
-            error = obs.metadata.get("summary") if isinstance(obs.metadata, dict) else None
+                for step in range(1, MAX_STEPS + 1):
+                    if result.done:
+                        break
 
-            rewards.append(reward)
-            steps_taken = step
-            last_reward = reward
+                    action = get_model_action(client, step, task.prompt, available_tools, last_reward, history)
+                    result = await env.step(action)
+                    obs = result.observation
+                    task = obs.current_task
+                    available_tools = obs.available_tools
 
-            log_step(
-                step=step,
-                action=action.model_dump_json(),
-                reward=reward,
-                done=done,
-                error=error,
-            )
+                    reward = result.reward or 0.0
+                    done = result.done
+                    error = obs.metadata.get("summary") if isinstance(obs.metadata, dict) else None
 
-            history.append(f"{action.model_dump_json()}|Step {step}|reward {reward:+.2f}|task_id {getattr(task, 'id', 'unknown')}|difficulty {getattr(task, 'difficulty', 'unknown')}")
+                    rewards.append(reward)
+                    steps_taken = step
+                    last_reward = reward
 
-            if done:
-                break
+                    log_step(
+                        step=step,
+                        action=action.model_dump_json(),
+                        reward=reward,
+                        done=done,
+                        error=error,
+                    )
 
-        score = sum(rewards) / MAX_TOTAL_REWARD if MAX_TOTAL_REWARD > 0 else 0.0
-        score = min(max(score, 0.0), 1.0)  # clamp to [0, 1]
-        success = score >= SUCCESS_SCORE_THRESHOLD
+                    history.append(f"{action.model_dump_json()}|Step {step}|reward {reward:+.2f}|task_id {getattr(task, 'id', 'unknown')}|difficulty {getattr(task, 'difficulty', 'unknown')}")
 
+                    if done:
+                        break
+
+                score = sum(rewards) / MAX_TOTAL_REWARD if MAX_TOTAL_REWARD > 0 else 0.0
+                score = max(0.01, min(0.99, score))  # clamp to (0, 1)
+                success = score >= SUCCESS_SCORE_THRESHOLD
+            finally:
+                log_end(success=success, steps=steps_taken, score=score, rewards=rewards)
     finally:
         try:
             await env.close()
-        except Exception as e:
-            print(f"[DEBUG] env.close() error (container cleanup): {e}", flush=True)
-        log_end(success=success, steps=steps_taken, score=score, rewards=rewards)
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":

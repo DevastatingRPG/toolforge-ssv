@@ -5,13 +5,14 @@ runtime: fastapi
 app: server.app:app
 port: 8000
 tasks:
-  - id: easy-deployment-sprints
-    description: "Repetitive service rollout and validation cycles"
-    grader: toolforge_env.graders:EasyGrader
-  - id: medium-traffic-readiness
-    description: "Preparing services for specific traffic goals"
-    grader: toolforge_env.graders:MediumGrader
-  - id: hard-project-legacy-migration
-    description: "Project: Decommissioning Legacy Data Center to Cloud"
-    grader: toolforge_env.graders:HardGrader
+  - id: easy
+    description: "Repetitive deployment, scaling, and rollback drills with highly repeating tool-call patterns."
+    grader: server.graders.grade_easy
 
+  - id: medium
+    description: "Goal-driven incident response and traffic-readiness scenarios requiring multi-step reasoning."
+    grader: server.graders.grade_medium
+
+  - id: hard
+    description: "Multi-phase infrastructure migration and zero-trust security projects with complex dependencies."
+    grader: server.graders.grade_hard

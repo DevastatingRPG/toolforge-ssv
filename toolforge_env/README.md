@@ -1,6 +1,5 @@
 ---
 title: ToolForge Environment Server
-emoji: 🛠️
 colorFrom: gray
 colorTo: blue
 sdk: docker
