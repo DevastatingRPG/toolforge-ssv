@@ -46,6 +46,7 @@ import json
 import os
 import textwrap
 from typing import List, Optional, Dict, Any
+import time
 
 from openai import OpenAI
 
@@ -68,9 +69,6 @@ TASKS = [
     "hard",
 ]
 
-# Max possible reward: each token contributes 0.1, across all steps
-_MAX_REWARD_PER_STEP = MAX_TOKENS * 0.1
-MAX_TOTAL_REWARD = MAX_STEPS * _MAX_REWARD_PER_STEP
 
 SYSTEM_PROMPT = textwrap.dedent(
     """
@@ -268,7 +266,7 @@ async def main() -> None:
                     )
 
                     history.append(f"{action.model_dump_json()}|Step {step}|reward {reward:+.2f}|task_id {getattr(task, 'id', 'unknown')}|difficulty {getattr(task, 'difficulty', 'unknown')}")
-
+                    time.sleep(10) # brief pause to avoid overwhelming the hf endpoint with rapid requests; adjust as needed based on rate limits and response times
                     if done:
                         break
 
