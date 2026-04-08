@@ -7,11 +7,11 @@ port: 8000
 tasks:
   - id: easy-deployment-sprints
     description: "Repetitive service rollout and validation cycles"
-    grader: graders:EasyGrader
+    grader: toolforge_env.graders:EasyGrader
   - id: medium-traffic-readiness
     description: "Preparing services for specific traffic goals"
-    grader: graders:MediumGrader
+    grader: toolforge_env.graders:MediumGrader
   - id: hard-project-legacy-migration
     description: "Project: Decommissioning Legacy Data Center to Cloud"
-    grader: graders:HardGrader
+    grader: toolforge_env.graders:HardGrader
 
