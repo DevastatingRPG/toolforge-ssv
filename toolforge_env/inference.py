@@ -49,16 +49,16 @@ from typing import List, Optional, Dict, Any
 
 from openai import OpenAI
 
-from toolforge_env import ToolforgeAction, ToolforgeEnv
-from models import ToolCall, Tool
+from toolforge_env import ToolforgeEnv, graders
+from models import ToolCall, Tool, ToolforgeAction
 IMAGE_NAME = os.getenv("IMAGE_NAME", "openenv-toolforge") # If you are using docker image 
 API_KEY = os.getenv("HF_TOKEN") or os.getenv("API_KEY")
 
 API_BASE_URL = os.getenv("API_BASE_URL") or "https://router.huggingface.co/v1"
 MODEL_NAME = os.getenv("MODEL_NAME") or "Qwen/Qwen2.5-72B-Instruct"
 BENCHMARK = os.getenv("MY_ENV_V4_BENCHMARK", "toolforge_env")
-MAX_STEPS = 8
-TEMPERATURE = 0.7
+MAX_STEPS = 20
+TEMPERATURE = 0
 MAX_TOKENS = 500
 SUCCESS_SCORE_THRESHOLD = 0.1  # normalized score in [0, 1]
 
@@ -209,14 +209,16 @@ def get_model_action(
         raw = raw.replace("```json", "").replace("```", "").strip()
         return ToolforgeAction(**json.loads(raw))
 
-    except Exception:
+    except Exception as e:
+        print(f"Error occurred: {e}")
         return build_fallback_action(available_tools, current_task)
 
 
 async def main() -> None:
     client = OpenAI(base_url=API_BASE_URL, api_key=API_KEY)
 
-    env = await ToolforgeEnv.from_docker_image(IMAGE_NAME)
+    env = await ToolforgeEnv.from_docker_image(IMAGE_NAME, env_vars={"HF_TOKEN": API_KEY})
+    grader = graders.EpisodeGrader()
     task_list = get_task_list()
 
     try:
@@ -270,8 +272,7 @@ async def main() -> None:
                     if done:
                         break
 
-                score = sum(rewards) / MAX_TOTAL_REWARD if MAX_TOTAL_REWARD > 0 else 0.0
-                score = max(0.01, min(0.99, score))  # clamp to (0, 1)
+                score = grader.grade(obs)
                 success = score >= SUCCESS_SCORE_THRESHOLD
             finally:
                 log_end(success=success, steps=steps_taken, score=score, rewards=rewards)

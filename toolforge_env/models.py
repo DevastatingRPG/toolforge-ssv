@@ -121,20 +121,6 @@ class ToolforgeAction(Action):
     )
 
 
-class ToolforgeObservation(Observation):
-    """Observation from the Toolforge Env environment - the echoed message."""
-
-    # The active task the agent must complete
-    current_task: Task = Field(
-        ..., description="The active task the agent must complete"
-    )
-
-    # List of tools currently available to the agent
-    available_tools: List[Dict[str, Any]] = Field(
-        ..., description="List of tools currently available to the agent"
-    )
-
-
 class EpisodeGradingState(BaseModel):
     """Aggregate episode-level signals consumed by the grader.
     
@@ -169,6 +155,24 @@ class EpisodeGradingState(BaseModel):
     macro_rejected_count: int = 0
     # Total tasks completed by episode end
     final_completed_tasks: int = 0
+
+
+class ToolforgeObservation(Observation):
+    """Observation from the Toolforge Env environment - the echoed message."""
+
+    # The active task the agent must complete
+    current_task: Task = Field(
+        ..., description="The active task the agent must complete"
+    )
+
+    # List of tools currently available to the agent
+    available_tools: List[Dict[str, Any]] = Field(
+        ..., description="List of tools currently available to the agent"
+    )
+
+    grading: Optional[EpisodeGradingState] = Field(
+        None, description="Episode-level grading signals accumulated during the episode"
+    )
 
 
 class ToolForgeState(State):

@@ -84,6 +84,10 @@ def run_evaluation_pipeline(
         [call.tool_name for call in plan],
     )
     
+    # Temporarily add proposed macro to available tools for evaluation purposes.
+    if macro_proposal:
+        available_tools[macro_proposal.name] = macro_proposal
+
     # 1. run_sanity_validation(...)
     validation = run_sanity_validation(plan, available_tools)
     logger.info(

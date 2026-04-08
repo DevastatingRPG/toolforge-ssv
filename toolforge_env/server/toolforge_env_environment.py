@@ -142,6 +142,8 @@ class ToolforgeEnvironment(Environment):
         return ToolforgeObservation(
             current_task=self._state.current_task,
             available_tools=self._available_tools_to_prompt_specs(self._state.available_tools),
+            grading = self._state.grading
+
         )
 
     def _tool_to_prompt_spec(self, tool: Tool) -> Dict[str, Any]:
@@ -327,11 +329,13 @@ class ToolforgeEnvironment(Environment):
         # Fetch the scalar reward from the evaluation pipeline
         reward = float(pipeline_result.reward)
         print(self._state.current_task.prompt, reward, progression, macro_result)
+        print(f"Done: {self._state.done}{self._is_done()} | Step {self._state.step_count} | Task '{self._state.current_task.id}' | Reward: {reward:.3f} | Progression: {progression} | Macro Proposal: {macro_result}")
         return ToolforgeObservation(
             current_task=self._state.current_task,
             available_tools=self._available_tools_to_prompt_specs(self._state.available_tools),
             done=self._is_done(),
-            reward=reward
+            reward=reward,
+            grading = self._state.grading
         )
 
     def _advance_to_next_task(self) -> bool:
@@ -410,6 +414,8 @@ class ToolforgeEnvironment(Environment):
 
         # Keep completed task count current
         g.final_completed_tasks = len(self._state.completed_tasks)
+
+        self._state.grading = g
 
 
     def _analyze_plan(self, plan: List[ToolCall]) -> Dict[str, Any]:
