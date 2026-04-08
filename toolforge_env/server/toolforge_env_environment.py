@@ -178,11 +178,6 @@ class ToolforgeEnvironment(Environment):
         """
         ep_id = episode_id if episode_id is not None else str(uuid4())
 
-        # old state preservation
-        prev_accepted_macros = self._state.accepted_macros if hasattr(self, '_state') else []
-        prev_macro_defs = self._state.macro_definitions if hasattr(self, '_state') else {}
-        prev_rejected_count = self._state.rejected_macro_count if hasattr(self, '_state') else 0
-
         self._state = self._create_default_state()
         self._state.episode_id = ep_id
         self._reset_count += 1
@@ -196,16 +191,16 @@ class ToolforgeEnvironment(Environment):
         self._state.current_task = first_task
         self._sync_task_queue_from_generator()
         self._state.completed_tasks = []
-        self._state.available_tools = build_atomic_tools() + prev_accepted_macros
-        self._state.accepted_macros = prev_accepted_macros
-        self._state.rejected_macro_count = prev_rejected_count
+        self._state.available_tools = build_atomic_tools()
+        self._state.accepted_macros = []
+        self._state.rejected_macro_count = 0
         self._state.call_history = []
         self._state.tokens_used = 0
         self._state.done = False
         # Reset episode-level macro tracking state
         self._state.sequence_counts = {}
         self._state.macro_usage_counts = {}
-        self._state.macro_definitions = prev_macro_defs
+        self._state.macro_definitions = {}
         self._last_approval = None
 
         # Fresh episode-level grading accumulator
