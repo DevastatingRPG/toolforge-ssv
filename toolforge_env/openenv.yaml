@@ -5,10 +5,14 @@ runtime: fastapi
 app: server.app:app
 port: 8000
 tasks:
-	- id: task_easy
-		grader: graders:EasyGrader
-	- id: task_medium
-		grader: graders:MediumGrader
-	- id: task_hard
-		grader: graders:HardGrader
+  - id: easy
+    description: "Repetitive deployment, scaling, and rollback drills with highly repeating tool-call patterns."
+    grader: server.graders.grade_easy
 
+  - id: medium
+    description: "Goal-driven incident response and traffic-readiness scenarios requiring multi-step reasoning."
+    grader: server.graders.grade_medium
+
+  - id: hard
+    description: "Multi-phase infrastructure migration and zero-trust security projects with complex dependencies."
+    grader: server.graders.grade_hard

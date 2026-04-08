@@ -18,7 +18,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from openai import OpenAI
 
-from toolforge_env.models import (
+from models import (
     MacroProposal,
     SlotJudgmentResult,
     Task,
@@ -27,11 +27,11 @@ from toolforge_env.models import (
     ToolEvaluation,
     ValidationResult,
 )
-from toolforge_env.server.llm_eval_prompts import (
+from server.llm_eval_prompts import (
     SLOT_JUDGE_SYSTEM_PROMPT,
     build_slot_judge_user_prompt,
 )
-from toolforge_env.server.slots import DEVOPS_SLOTS
+from server.slots import DEVOPS_SLOTS
 
 logger = logging.getLogger(__name__)
 

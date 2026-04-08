@@ -38,16 +38,14 @@ except Exception as e:  # pragma: no cover
 try:
     from models import ToolforgeAction, ToolforgeObservation
     from server.toolforge_env_environment import ToolforgeEnvironment
-    from server.environment.factory import create_env
 except ModuleNotFoundError:
     from ..models import ToolforgeAction, ToolforgeObservation
     from .toolforge_env_environment import ToolforgeEnvironment
-    from environment.factory import create_env
 
 
 # Create the app with web interface and README integration
 app = create_app(
-    create_env,
+    ToolforgeEnvironment,
     ToolforgeAction,
     ToolforgeObservation,
     env_name="toolforge_env",
