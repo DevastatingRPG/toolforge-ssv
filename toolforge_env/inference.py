@@ -265,7 +265,7 @@ async def main() -> None:
                     )
 
                     history.append(f"{action.model_dump_json()}|Step {step}|reward {reward:+.2f}|task_id {getattr(task, 'id', 'unknown')}|difficulty {getattr(task, 'difficulty', 'unknown')}")
-                    time.sleep(10) # brief pause to avoid overwhelming the hf endpoint with rapid requests; adjust as needed based on rate limits and response times
+                    await asyncio.sleep(10) # brief pause to avoid overwhelming the hf endpoint with rapid requests; adjust as needed based on rate limits and response times
                     if done:
                         break
 
