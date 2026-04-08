@@ -73,55 +73,6 @@ HF_TOKEN = os.getenv("HF_TOKEN", "")
 
 # ─── Stage 2 Helpers: Semantic Judge ─────────────────────────────────────────
 
-def _build_judge_request(
-    task_prompt: str,
-    required_slots: List[str],
-    slot_definitions: Dict[str, str],
-    available_tools: List[Tool],
-    plan: List[ToolCall],
-) -> Dict[str, Any]:
-    """Build the expected LLM judge prompt/input."""
-    return {
-        "task_prompt": task_prompt,
-        "required_slots": required_slots,
-        "slot_definitions": slot_definitions,
-        "tools": [t.name for t in available_tools],
-        "plan": [{"tool": c.tool_name} for c in plan]
-    }
-
-def _simulate_llm_judgment(
-    judge_request: Dict[str, Any],
-    plan: List[ToolCall],
-    required_slots: List[str]
-) -> Dict[str, Any]:
-    """Simulate the LLM response in the flat summary format.
-
-    Returns the same schema as defined in SLOT_JUDGE_SYSTEM_PROMPT.
-    """
-    slots_filled = []
-    harmful_calls = []
-    unnecessary_calls = []
-
-    slots_filled_so_far = set()
-
-    for call in plan:
-        if "delete" in call.tool_name or "drop" in call.tool_name:
-            harmful_calls.append(call.tool_name)
-        elif len(slots_filled_so_far) < len(required_slots):
-            slot = required_slots[len(slots_filled_so_far)]
-            slots_filled.append(slot)
-            slots_filled_so_far.add(slot)
-        else:
-            unnecessary_calls.append(call.tool_name)
-
-    return {
-        "slots_filled": slots_filled,
-        "slots_missing": [s for s in required_slots if s not in slots_filled],
-        "unnecessary_calls": unnecessary_calls,
-        "harmful_calls": harmful_calls
-    }
-
-
 def _call_llm_slot_judgment(
     task_prompt: str,
     required_slots: List[str],
@@ -434,8 +385,6 @@ def run_slot_judgment(
     plan: List[ToolCall],
 ) -> SlotJudgmentResult:
     """Stage 2: Evaluate a validated plan against the task's semantic slots."""
-
-    req = _build_judge_request(task_prompt, required_slots, slot_definitions, available_tools, plan)
 
     max_attempts = 3
     raw_json = None
