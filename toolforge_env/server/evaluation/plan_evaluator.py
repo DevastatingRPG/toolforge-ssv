@@ -17,12 +17,10 @@ from typing import Any, Dict, List, Optional, Tuple
 from openai import OpenAI
 
 from models import (
-    MacroProposal,
     SlotJudgmentResult,
     Task,
     Tool,
     ToolCall,
-    ToolEvaluation,
     ValidationResult,
 )
 from server.evaluation.llm_eval_prompts import (

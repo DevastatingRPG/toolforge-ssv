@@ -32,14 +32,14 @@ ToolForge goes beyond simple tool execution benchmarks. It evaluates an agent's 
 
 ```python
 from toolforge_env.toolforge_env_environment import ToolforgeEnvironment
-from toolforge_env.models import ToolforgeAction, ToolCall, Tool
+from toolforge_env.models import ToolForgeAction, ToolCall, Tool
 
 env = ToolforgeEnvironment()
 result = env.reset(mode="eval", difficulty="easy")
 
 print(f"Task: {result.current_task.prompt}")
 
-action = ToolforgeAction(
+action = ToolForgeAction(
     action_type="propose_plan",
     plan=[
         ToolCall(tool_name="deploy"),
@@ -50,7 +50,7 @@ action = ToolforgeAction(
 result = env.step(action)
 print(f"Reward: {result.reward}")
 
-macro_action = ToolforgeAction(
+macro_action = ToolForgeAction(
     action_type="propose_plan_with_macro",
     plan=[
         ToolCall(tool_name="deploy"),
@@ -92,7 +92,7 @@ openenv push --repo-id your-org/toolforge-env
 
 ### Actions
 
-**`ToolforgeAction`**
+**`ToolForgeAction`**
 
 - `action_type`: `"propose_plan"` or `"propose_plan_with_macro"`
 - `plan`: List of `ToolCall`
@@ -100,7 +100,7 @@ openenv push --repo-id your-org/toolforge-env
 
 ### Observations
 
-**`ToolforgeObservation`**
+**`ToolForgeObservation`**
 
 - `current_task`
 - `available_tools`

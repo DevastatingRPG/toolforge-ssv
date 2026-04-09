@@ -12,11 +12,11 @@ from openenv.core import EnvClient
 from openenv.core.client_types import StepResult
 from openenv.core.env_server.types import State
 
-from .models import ToolforgeAction, ToolforgeObservation
+from .models import ToolForgeAction, ToolForgeObservation
 
 
 class ToolforgeEnv(
-    EnvClient[ToolforgeAction, ToolforgeObservation, State]
+    EnvClient[ToolForgeAction, ToolForgeObservation, State]
 ):
     """
     Client for the Toolforge Env Environment.
@@ -31,7 +31,7 @@ class ToolforgeEnv(
         ...     result = client.reset()
         ...     print(result.observation.echoed_message)
         ...
-        ...     result = client.step(ToolforgeAction(message="Hello!"))
+        ...     result = client.step(ToolForgeAction(message="Hello!"))
         ...     print(result.observation.echoed_message)
 
     Example with Docker:
@@ -39,35 +39,35 @@ class ToolforgeEnv(
         >>> client = ToolforgeEnv.from_docker_image("toolforge_env-env:latest")
         >>> try:
         ...     result = client.reset()
-        ...     result = client.step(ToolforgeAction(message="Test"))
+        ...     result = client.step(ToolForgeAction(message="Test"))
         ... finally:
         ...     client.close()
     """
 
-    def _step_payload(self, action: ToolforgeAction) -> Dict:
+    def _step_payload(self, action: ToolForgeAction) -> Dict:
         """
-        Convert ToolforgeAction to JSON payload for step message.
+        Convert ToolForgeAction to JSON payload for step message.
 
         Args:
-            action: ToolforgeAction instance
+            action: ToolForgeAction instance
 
         Returns:
             Dictionary representation suitable for JSON encoding
         """
         return action.model_dump(mode="json", exclude_none=True)
 
-    def _parse_result(self, payload: Dict) -> StepResult[ToolforgeObservation]:
+    def _parse_result(self, payload: Dict) -> StepResult[ToolForgeObservation]:
         """
-        Parse server response into StepResult[ToolforgeObservation].
+        Parse server response into StepResult[ToolForgeObservation].
 
         Args:
             payload: JSON response data from server
 
         Returns:
-            StepResult with ToolforgeObservation
+            StepResult with ToolForgeObservation
         """
         obs_data = payload.get("observation", {})
-        observation = ToolforgeObservation(
+        observation = ToolForgeObservation(
             **obs_data,
             done=payload.get("done", False),
             reward=payload.get("reward"),

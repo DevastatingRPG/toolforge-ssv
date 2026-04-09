@@ -169,7 +169,7 @@ Represents either:
 
 This model is also used when a macro is proposed or when a macro becomes part of the available tool inventory.
 
-#### `ToolforgeAction`
+#### `ToolForgeAction`
 Represents the agent action sent to the environment. It includes:
 - `action_type`
 - `plan`
@@ -186,7 +186,7 @@ Represents one operational goal. It contains:
 - `required_slots`,
 - baseline call-count metadata.
 
-#### `ToolforgeObservation`
+#### `ToolForgeObservation`
 Represents the environment response after `reset()` or `step()`. It exposes:
 - current task,
 - available tools visible to the agent,

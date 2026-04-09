@@ -7,10 +7,10 @@
 """Toolforge Env Environment."""
 
 from .client import ToolforgeEnv
-from .models import ToolforgeAction, ToolforgeObservation
+from .models import ToolForgeAction, ToolForgeObservation
 
 __all__ = [
-    "ToolforgeAction",
-    "ToolforgeObservation",
+    "ToolForgeAction",
+    "ToolForgeObservation",
     "ToolforgeEnv",
 ]

@@ -31,8 +31,8 @@ try:
     from ..models import (
         Tool,
         ToolCall,
-        ToolforgeAction,
-        ToolforgeObservation,
+        ToolForgeAction,
+        ToolForgeObservation,
         ToolForgeState,
         Task,
         EpisodeGradingState,
@@ -41,8 +41,8 @@ except ImportError:
     from models import (
         Tool,
         ToolCall,
-        ToolforgeAction,
-        ToolforgeObservation,
+        ToolForgeAction,
+        ToolForgeObservation,
         ToolForgeState,
         Task,
         EpisodeGradingState,
@@ -73,7 +73,7 @@ class ToolforgeEnvironment(Environment):
         >>> obs = env.reset()
         >>> print(obs.echoed_message)  # "Toolforge Env environment ready!"
         >>>
-        >>> obs = env.step(ToolforgeAction(message="Hello"))
+        >>> obs = env.step(ToolForgeAction(message="Hello"))
         >>> print(obs.echoed_message)  # "Hello"
         >>> print(obs.message_length)  # 5
     """
@@ -132,14 +132,14 @@ class ToolforgeEnvironment(Environment):
             done=False,
         )
 
-    def _create_default_observation(self) -> ToolforgeObservation:
+    def _create_default_observation(self) -> ToolForgeObservation:
         """
-        Create a default ToolforgeObservation with basic parameters.
+        Create a default ToolForgeObservation with basic parameters.
 
         Returns:
-            ToolforgeObservation with default values
+            ToolForgeObservation with default values
         """
-        return ToolforgeObservation(
+        return ToolForgeObservation(
             current_task=self._state.current_task,
             available_tools=self._available_tools_to_prompt_specs(self._state.available_tools),
             grading = self._state.grading
@@ -169,12 +169,12 @@ class ToolforgeEnvironment(Environment):
             episode_id: Optional[str] = None, 
             task_id: Optional[str] = None, 
             **kwargs
-        ) -> ToolforgeObservation:
+        ) -> ToolForgeObservation:
         """
         Reset the environment.
 
         Returns:
-            ToolforgeObservation with a ready message
+            ToolForgeObservation with a ready message
         """
         ep_id = episode_id if episode_id is not None else str(uuid4())
 
@@ -213,15 +213,15 @@ class ToolforgeEnvironment(Environment):
 
         return obs
 
-    def step(self, action: ToolforgeAction) -> ToolforgeObservation:  # type: ignore[override]
+    def step(self, action: ToolForgeAction) -> ToolForgeObservation:  # type: ignore[override]
         """
         Execute a step in the environment by echoing the message.
 
         Args:
-            action: ToolforgeAction containing the message to echo
+            action: ToolForgeAction containing the message to echo
 
         Returns:
-            ToolforgeObservation with the echoed message and its length
+            ToolForgeObservation with the echoed message and its length
         """
         if self._is_done():
             obs_terminal = self._create_default_observation()
@@ -233,9 +233,9 @@ class ToolforgeEnvironment(Environment):
             }
             return obs_terminal
 
-        if not isinstance(action, ToolforgeAction):
+        if not isinstance(action, ToolForgeAction):
             logger.warning(
-                "Malformed action rejected. Expected ToolforgeAction, got %s",
+                "Malformed action rejected. Expected ToolForgeAction, got %s",
                 type(action).__name__,
             )
             self._state.step_count += 1
@@ -324,7 +324,7 @@ class ToolforgeEnvironment(Environment):
         reward = float(pipeline_result.reward)
         print(self._state.current_task.prompt, reward, progression, macro_result)
         print(f"Done: {self._state.done}{self._is_done()} | Step {self._state.step_count} | Task '{self._state.current_task.id}' | Reward: {reward:.3f} | Progression: {progression} | Macro Proposal: {macro_result}")
-        return ToolforgeObservation(
+        return ToolForgeObservation(
             current_task=self._state.current_task,
             available_tools=self._available_tools_to_prompt_specs(self._state.available_tools),
             done=self._is_done(),
@@ -364,7 +364,7 @@ class ToolforgeEnvironment(Environment):
         self,
         pipeline_result,
         macro_result: Dict[str, Any],
-        action: ToolforgeAction,
+        action: ToolForgeAction,
     ) -> None:
         """Accumulate episode-level grading counters from a single step."""
         g = self._state.grading
@@ -432,7 +432,7 @@ class ToolforgeEnvironment(Environment):
 
     def _process_macro_proposal(
         self,
-        action: ToolforgeAction,
+        action: ToolForgeAction,
         can_accept: bool,
         reject_reason: str,
     ) -> Dict[str, Any]:
