@@ -51,7 +51,7 @@ import time
 from openai import OpenAI
 
 from toolforge_env import ToolforgeEnv, graders
-from models import ToolCall, Tool, ToolforgeAction
+from models import ToolCall, Tool, ToolForgeAction
 IMAGE_NAME = os.getenv("IMAGE_NAME", "openenv-toolforge") # If you are using docker image 
 API_KEY = os.getenv("HF_TOKEN") or os.getenv("API_KEY")
 
@@ -73,7 +73,7 @@ TASKS = [
 SYSTEM_PROMPT = textwrap.dedent(
     """
     You are an agent acting in the Toolforge environment.
-    Return ONLY valid JSON matching the ToolforgeAction schema.
+    Return ONLY valid JSON matching the ToolForgeAction schema.
 
     Objective:
     - Maximize reward by completing task-required behavior with the relevant useful tool calls.
@@ -162,14 +162,14 @@ def build_user_prompt(step: int, current_task: Any, available_tools: List[Dict[s
         - Prefer generic repeatable patterns across easy, medium, and hard tasks.
         - Keep the plan short while satisfying required task intent.
 
-        Return a ToolforgeAction whose `plan` uses only currently available tools.
+        Return a ToolForgeAction whose `plan` uses only currently available tools.
         """
     ).strip()
 
 
-def build_fallback_action(available_tools: List[Dict[str, Any]], current_task: str) -> ToolforgeAction:
+def build_fallback_action(available_tools: List[Dict[str, Any]], current_task: str) -> ToolForgeAction:
     fallback_tool = available_tools[0]["name"] if available_tools else "noop"
-    return ToolforgeAction(
+    return ToolForgeAction(
         action_type="propose_plan",
         plan=[
             ToolCall(tool_name=fallback_tool)
@@ -185,15 +185,15 @@ def get_model_action(
     available_tools: List[Dict[str, Any]],
     last_reward: float,
     history: List[str],
-) -> ToolforgeAction:
+) -> ToolForgeAction:
     user_prompt = build_user_prompt(step, current_task, available_tools, last_reward, history)
     try:    
         completion = client.chat.completions.create(
             model=MODEL_NAME,
             messages=[
-                {"role": "system", "content": SYSTEM_PROMPT + "\nRespond ONLY with valid JSON matching the ToolforgeAction schema. No markdown, no explanation."},
+                {"role": "system", "content": SYSTEM_PROMPT + "\nRespond ONLY with valid JSON matching the ToolForgeAction schema. No markdown, no explanation."},
                 {"role": "user", "content": user_prompt + 
-                 f"\n\nSchema:\n{json.dumps(ToolforgeAction.model_json_schema(), indent=2)}" + 
+                 f"\n\nSchema:\n{json.dumps(ToolForgeAction.model_json_schema(), indent=2)}" + 
                  f"\n\nToolSchema:\n{json.dumps(Tool.model_json_schema(), indent=2)}" +
                  f"\n\nToolCallSchema:\n{json.dumps(ToolCall.model_json_schema(), indent=2)}"},
             ],
@@ -205,7 +205,7 @@ def get_model_action(
             return build_fallback_action(available_tools, current_task)
         raw = raw.strip()
         raw = raw.replace("```json", "").replace("```", "").strip()
-        return ToolforgeAction(**json.loads(raw))
+        return ToolForgeAction(**json.loads(raw))
 
     except Exception as e:
         return build_fallback_action(available_tools, current_task)
@@ -222,9 +222,9 @@ async def main() -> None:
         for task_name in task_list:
             history: List[str] = []
             rewards: List[float] = []
-            steps_taken = 0
-            score = 0.0
-            success = False
+            steps_taken: int = 0
+            score: float = 0.0
+            success: bool = False
 
             log_start(task=task_name, env=BENCHMARK, model=MODEL_NAME)
 

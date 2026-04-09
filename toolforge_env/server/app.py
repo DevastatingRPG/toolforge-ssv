@@ -36,18 +36,18 @@ except Exception as e:  # pragma: no cover
     ) from e
 
 try:
-    from models import ToolforgeAction, ToolforgeObservation
+    from models import ToolForgeAction, ToolForgeObservation
     from server.toolforge_env_environment import ToolforgeEnvironment
 except ModuleNotFoundError:
-    from ..models import ToolforgeAction, ToolforgeObservation
+    from ..models import ToolForgeAction, ToolForgeObservation
     from .toolforge_env_environment import ToolforgeEnvironment
 
 
 # Create the app with web interface and README integration
 app = create_app(
     ToolforgeEnvironment,
-    ToolforgeAction,
-    ToolforgeObservation,
+    ToolForgeAction,
+    ToolForgeObservation,
     env_name="toolforge_env",
     max_concurrent_envs=1,  # increase this number to allow more concurrent WebSocket sessions
 )

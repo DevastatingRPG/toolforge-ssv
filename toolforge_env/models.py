@@ -7,12 +7,17 @@
 """
 Data models for the Toolforge Env Environment.
 
-The toolforge_env environment is a simple test environment that echoes back messages.
+The ToolForge environment is a Tool-Call optimizing environment which abstracts commonly used tool sequences into reusable macros.
 """
 
 from openenv.core.env_server.types import Action, Observation, State
 from typing import Any, Dict, List, Literal, Optional, Tuple
 from pydantic import Field, BaseModel, ConfigDict, model_validator
+
+# ==============================================================================
+# SECTION 1: PRIMITIVES & DOMAIN MODELS
+# The foundational building blocks for tasks, tools, and proposals.
+# ==============================================================================
 
 class ToolCall(BaseModel):
     """
@@ -21,26 +26,39 @@ class ToolCall(BaseModel):
     """
     model_config = ConfigDict(extra="forbid")
 
-    # Name of the tool being called
     tool_name: str    
+    """Name of the tool being called"""
 
 
 class Tool(BaseModel):
     """
-    Represents an available tool in the environment.
-    This can be an atomic tool or a composed macro tool.
+    Represents an executable tool within the environment.
+    This can be either a standard atomic tool or a composed macro tool.
     """
-    # Identifier name of the tool
-    name: str
     
-    # Human-readable description of what the tool does
+    name: str 
+    """The unique identifier name of the tool."""
+    
     description: str
+    """A clear, human-readable explanation of what the tool accomplishes."""
     
-    # Flag indicating whether this tool is a macro (composed of smaller tools)
     is_macro: bool = False
+    """A flag indicating whether this tool is a macro (composed of a sequence of smaller tool calls)."""
     
-    # Optional list of tool names this macro is composed of
-    steps: Optional[List[ToolCall]] = None
+    steps: Optional[List['ToolCall']] = None
+    """
+    The sequential list of tool calls that make up the macro. 
+    This must be populated if `is_macro` is True, and must be None if it is an atomic tool.
+    """
+
+    @model_validator(mode="after")
+    def validate_macro_steps(self) -> "Tool":
+        """Ensures the structural integrity of the tool by validating the steps."""
+        if self.is_macro and not self.steps:
+            raise ValueError(f"Macro '{self.name}' must have steps.")
+        if not self.is_macro and self.steps:
+            raise ValueError(f"Atomic tool '{self.name}' cannot have steps.")
+        return self
 
 
 
@@ -49,23 +67,24 @@ class Task(BaseModel):
     Represents a DevOps task that the agent needs to accomplish.
     Contains the prompt, difficulty, semantic slots, and baseline cost metadata.
     """
-    # Unique identifier for the task
+
     id: str
+    """Unique identifier for the task"""
 
-    # The user-facing prompt describing the task
     prompt: str
+    """The user-facing prompt describing the task"""
 
-    # The difficulty level of the task
     difficulty: Literal["easy", "medium", "hard"]
+    """The difficulty level of the task"""
 
-    # Semantic slot names the judge checks against (e.g. DEPLOYMENT_ACTION)
     required_slots: List[str]
+    """Semantic slot names the judge checks against (e.g. DEPLOYMENT_ACTION)"""
 
-    # Naive token cost of executing the task's intended atomic sequence
     baseline_token_cost: int = 0
+    """Naive token cost of executing the task's intended atomic sequence"""
 
-    # Backward-compatible field used by task fixtures in this repository
     baseline_call_count: int = 0
+    """Backward-compatible field used by task fixtures in this repository"""
 
     @model_validator(mode="before")
     @classmethod
@@ -101,24 +120,23 @@ class MacroProposal(BaseModel):
     steps: List[ToolCall]
 
 
-class ToolforgeAction(Action):
-    """Action for the Toolforge Env environment - just a message to echo."""
+# ==============================================================================
+# SECTION 2: CORE ENVIRONMENT API
+# Models defining the inputs, outputs, and internal state of the environment.
+# ==============================================================================
 
-    # The type of action being performed
-    action_type: Literal["propose_plan", "propose_plan_with_macro"] = Field(
-        ..., description="The type of action being performed"
-    )
 
-    # The execution plan consisting of sequential tool calls
-    plan: List[ToolCall] = Field(
-        ..., description="The execution plan consisting of sequential tool calls"
-    )
+class ToolForgeAction(Action):
+    """Action for the Toolforge Env environment - Contains the plan needed to fulfill the prompt."""
 
-    # Optional proposal for a new macro, if action_type is "propose_plan_with_macro"
-    macro_proposal: Optional[Tool] = Field(
-        None,
-        description="Optional proposal for a new macro, used when action_type is 'propose_plan_with_macro'"
-    )
+    action_type: Literal["propose_plan", "propose_plan_with_macro"] 
+    """The type of action being performed"""
+
+    plan: List[ToolCall] 
+    """The execution plan consisting of sequential tool calls"""
+
+    macro_proposal: Optional[Tool] = None
+    """Optional proposal for a new macro, used when action_type is 'propose_plan_with_macro'"""
 
 
 class EpisodeGradingState(BaseModel):
@@ -157,82 +175,87 @@ class EpisodeGradingState(BaseModel):
     final_completed_tasks: int = 0
 
 
-class ToolforgeObservation(Observation):
-    """Observation from the Toolforge Env environment - the echoed message."""
+class ToolForgeObservation(Observation):
+    """Observation from the ToolForge Env environment."""
 
-    # The active task the agent must complete
-    current_task: Task = Field(
-        ..., description="The active task the agent must complete"
-    )
+    current_task: Task 
+    """The active task the agent must complete"""
 
-    # List of tools currently available to the agent
-    available_tools: List[Dict[str, Any]] = Field(
-        ..., description="List of tools currently available to the agent"
-    )
+    available_tools: List[Dict[str, Any]] 
+    """List of tools currently available to the agent"""
 
-    grading: Optional[EpisodeGradingState] = Field(
-        None, description="Episode-level grading signals accumulated during the episode"
-    )
+    grading: Optional[EpisodeGradingState] = None
+    """Episode-level grading signals accumulated during the episode"""
 
 
 class ToolForgeState(State):
     """
     The internal State class for the ToolForge environment.
     Keeps track of all task queues, completed metrics, and session statistics.
-    Subclasses the core OpenEnv State type.
     """
-    # The task currently being worked on
     current_task: Task
+    """The task currently being worked on"""
     
-    # Queue of upcoming tasks
     task_queue: List[Task]
+    """Queue of upcoming tasks"""
     
-    # List of tasks successfully completed
     completed_tasks: List[Task]
+    """List of tasks successfully completed"""
     
-    # All currently available tools
     available_tools: List[Tool]
+    """All currently available tools"""
     
-    # Successfully created macros
     accepted_macros: List[Tool]
+    """Successfully created macros"""
     
-    # Count of how many proposed macros were rejected
     rejected_macro_count: int
+    """Count of how many proposed macros were rejected"""
     
-    # Full history of tool calls in the session
     call_history: List[ToolCall]
+    """Full history of tool calls in the session"""
     
-    # Total accumulated token cost
     tokens_used: int
+    """Total accumulated token cost"""
     
-    # Flag indicating if the environment episode has concluded
     done: bool
+    """Flag indicating if the environment episode has concluded"""
 
-    # Exact ordered contiguous sequence counts observed earlier in the episode
     sequence_counts: Dict[str, int] = Field(default_factory=dict)
+    """Exact ordered contiguous sequence counts observed earlier in the episode"""
 
-    # Number of times each macro tool has been used
     macro_usage_counts: Dict[str, int] = Field(default_factory=dict)
+    """Number of times each macro tool has been used"""
 
-    # Macro name -> ordered atomic tool names it represents
     macro_definitions: Dict[str, List[str]] = Field(default_factory=dict)
+    """Macro name -> ordered atomic tool names it represents"""
 
-    # Episode-level grading accumulator (reset each episode)
     grading: EpisodeGradingState = Field(default_factory=EpisodeGradingState)
+    """Episode-level grading accumulator (reset each episode)"""
 
 
-class PlanAccuracyResult(BaseModel):
-    """Output of the Stage-3 plan accuracy calculator."""
-    # Fraction of required slots successfully filled
-    slot_completion_ratio: float
-    # Score generated from completion curve (<= 0)
-    slot_score: float
-    # Penalty magnitude for unnecessary steps (<= 0)
-    unnecessary_penalty: float
-    # Final Stage 3 score bounded [-1.0, 0.0]
-    score: float
-    # Named sub-scores for debugging/logging
-    breakdown: Dict[str, float]
+# ==============================================================================
+# SECTION 3: EVALUATION & JUDGING PIPELINE
+# Results outputted by the multi-stage grading system.
+# ==============================================================================
+
+
+class ValidationResult(BaseModel):
+    """
+    Output of the Stage-1 algorithmic validator.
+    Indicates whether a proposed plan is structurally valid.
+    """
+    # Whether the plan passed all structural checks
+    valid: bool
+
+    # Machine-readable reason code:
+    # VALID | EMPTY_PLAN | INVALID_TOOL | MISSING_PARAM | EXTRA_PARAM
+    reason: str
+
+    # Reward penalty to apply (0.0 for valid, negative otherwise)
+    penalty: float
+
+    # Optional human-readable detail (e.g. which tool/param failed)
+    detail: Optional[str] = None
 
 
 class ToolEvaluation(BaseModel):
@@ -279,6 +302,20 @@ class SlotJudgmentResult(BaseModel):
     judge_failed: bool = False
 
 
+class PlanAccuracyResult(BaseModel):
+    """Output of the Stage-3 plan accuracy calculator."""
+    # Fraction of required slots successfully filled
+    slot_completion_ratio: float
+    # Score generated from completion curve (<= 0)
+    slot_score: float
+    # Penalty magnitude for unnecessary steps (<= 0)
+    unnecessary_penalty: float
+    # Final Stage 3 score bounded [-1.0, 0.0]
+    score: float
+    # Named sub-scores for debugging/logging
+    breakdown: Dict[str, float]
+
+
 class TokenCostResult(BaseModel):
     """Output of the Stage-4 token-cost calculator."""
     # Actual tokens consumed by the plan
@@ -297,24 +334,6 @@ class TokenCostResult(BaseModel):
     macro_utility_bonus: float
     # Combined macro bonus (recognition + utility)
     macro_bonus: float
-
-class ValidationResult(BaseModel):
-    """
-    Output of the Stage-1 algorithmic validator.
-    Indicates whether a proposed plan is structurally valid.
-    """
-    # Whether the plan passed all structural checks
-    valid: bool
-
-    # Machine-readable reason code:
-    # VALID | EMPTY_PLAN | INVALID_TOOL | MISSING_PARAM | EXTRA_PARAM
-    reason: str
-
-    # Reward penalty to apply (0.0 for valid, negative otherwise)
-    penalty: float
-
-    # Optional human-readable detail (e.g. which tool/param failed)
-    detail: Optional[str] = None
 
 
 class PipelineResult(BaseModel):
