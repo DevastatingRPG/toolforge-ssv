@@ -112,6 +112,7 @@ def run_evaluation_pipeline(
             step_harmful=False,
             step_macro_creation_bonus=0.0,
             step_macro_usage_bonus=0.0,
+            step_macro_miss_penalty=0.0,
             step_efficiency_score=0.0,
         )
 
@@ -146,6 +147,7 @@ def run_evaluation_pipeline(
             step_harmful=True,
             step_macro_creation_bonus=0.0,
             step_macro_usage_bonus=0.0,
+            step_macro_miss_penalty=0.0,
             step_efficiency_score=0.0,
         )
 
@@ -164,6 +166,7 @@ def run_evaluation_pipeline(
             step_harmful=False,
             step_macro_creation_bonus=0.0,
             step_macro_usage_bonus=0.0,
+            step_macro_miss_penalty=0.0,
             step_efficiency_score=0.0,
         )
 
@@ -182,6 +185,7 @@ def run_evaluation_pipeline(
     slot_score = reward_breakdown["slot_score"]
     macro_creation = reward_breakdown["macro_creation"]
     macro_usage = reward_breakdown["macro_usage"]
+    macro_miss_penalty = reward_breakdown["macro_miss_penalty"]
     efficiency_score = reward_breakdown["efficiency_score"]
     final_reward = reward_breakdown["final_reward"]
 
@@ -191,9 +195,10 @@ def run_evaluation_pipeline(
         slot_score,
     )
     logger.info(
-        "Stage3 macro_bonuses | macro_creation=%.3f | macro_usage=%.3f",
+        "Stage3 macro_bonuses | macro_creation=%.3f | macro_usage=%.3f | macro_miss_penalty=%.3f",
         macro_creation,
         macro_usage,
+        macro_miss_penalty,
     )
     if slot_ratio >= 1.0:
         logger.info(
@@ -220,5 +225,6 @@ def run_evaluation_pipeline(
         step_harmful=False,
         step_macro_creation_bonus=macro_creation,
         step_macro_usage_bonus=macro_usage,
+        step_macro_miss_penalty=macro_miss_penalty,
         step_efficiency_score=efficiency_score,
     )

@@ -406,6 +406,9 @@ class ToolforgeEnvironment(Environment):
             if sr is not None and sr >= 0.65:
                 g.macro_usage_correct += 1
 
+        # Macro miss penalty tracking
+        g.macro_miss_penalty_total += (pipeline_result.step_macro_miss_penalty or 0.0)
+
         # Keep completed task count current
         g.final_completed_tasks = len(self._state.completed_tasks)
 

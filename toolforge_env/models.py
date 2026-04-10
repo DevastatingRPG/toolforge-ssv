@@ -171,6 +171,8 @@ class EpisodeGradingState(BaseModel):
     macro_usage_correct: int = 0
     # Times macro creation was rejected
     macro_rejected_count: int = 0
+    # Total accumulated macro miss penalty
+    macro_miss_penalty_total: float = 0.0
     # Total tasks completed by episode end
     final_completed_tasks: int = 0
 
@@ -359,6 +361,7 @@ class PipelineResult(BaseModel):
     step_harmful: Optional[bool] = None
     step_macro_creation_bonus: Optional[float] = None
     step_macro_usage_bonus: Optional[float] = None
+    step_macro_miss_penalty: Optional[float] = None
     step_efficiency_score: Optional[float] = None
 
 
