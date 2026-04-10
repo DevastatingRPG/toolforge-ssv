@@ -56,6 +56,9 @@ MACRO_CREATION_THRESHOLD = 2
 MACRO_CREATION_FULL_RANGE = {2, 3}  # counts that get full reward
 MACRO_USAGE_PARTIAL = 0.03   # when 0.65 <= slot_ratio < 1.0
 MACRO_USAGE_FULL = 0.05      # when slot_ratio == 1.0
+MACRO_MISS_PENALTY_MIN = 0.02
+MACRO_MISS_PENALTY_MAX = 0.05
+MACRO_MISS_PENALTY_CAP = 0.10
 
 # Stage 4: Tool efficiency bounds
 EFFICIENCY_SCORE_BASELINE = 0.2  # exact baseline match
@@ -298,6 +301,57 @@ def compute_macro_usage_bonus(
     return MACRO_USAGE_PARTIAL
 
 
+def compute_macro_miss_penalty(
+    plan: List[ToolCall],
+    accepted_macros: List[Tool],
+    slot_ratio: float,
+) -> float:
+    """Stage 3c: Macro miss penalty bounded to [-0.10, 0.0].
+
+    Gate: slot_ratio >= 0.65
+    Multiplied by the number of times the agent missed an opportunity to use a macro.
+    """
+    if slot_ratio < SLOT_THRESHOLD:
+        return 0.0
+
+    if not accepted_macros:
+        return 0.0
+
+    plan_tool_names = [call.tool_name for call in plan]
+    miss_count = 0
+
+    for macro in accepted_macros:
+        if not macro.steps:
+            continue
+
+        macro_seq = [call.tool_name for call in macro.steps]
+        seq_len = len(macro_seq)
+        
+        # We only penalize if the user wrote out the full atomic sequence
+        if seq_len < 2 or seq_len > len(plan_tool_names):
+            continue
+
+        i = 0
+        while i <= len(plan_tool_names) - seq_len:
+            if plan_tool_names[i:i + seq_len] == macro_seq:
+                miss_count += 1
+                i += seq_len  # Advance by sequence length to avoid overlapping counts
+            else:
+                i += 1
+
+    if miss_count == 0:
+        return 0.0
+
+    # Calculate base penalty based on slot_ratio. Linearly interpolates from MIN to MAX
+    base_penalty = MACRO_MISS_PENALTY_MIN + (MACRO_MISS_PENALTY_MAX - MACRO_MISS_PENALTY_MIN) * ((slot_ratio - SLOT_THRESHOLD) / (1.0 - SLOT_THRESHOLD))
+    
+    total_penalty = 0.0
+    for m in range(miss_count):
+        total_penalty += (base_penalty + m * 0.01)
+
+    return -min(MACRO_MISS_PENALTY_CAP, total_penalty)
+
+
 def compute_efficiency_score(
     plan: List[ToolCall],
     task: Task,
@@ -434,16 +488,17 @@ def compute_step_reward(
 
     macro_creation = compute_macro_creation_bonus(macro_proposal, sequence_counts, slot_ratio)
     macro_usage = compute_macro_usage_bonus(plan, accepted_macros, slot_ratio)
+    macro_miss_penalty = compute_macro_miss_penalty(plan, accepted_macros, slot_ratio)
 
     efficiency_score = 0.0
 
     if slot_ratio < SLOT_THRESHOLD:
         final_raw = slot_score
     elif slot_ratio < 1.0:
-        final_raw = slot_score + macro_creation + macro_usage
+        final_raw = slot_score + macro_creation + macro_usage + macro_miss_penalty
     else:
         efficiency_score = compute_efficiency_score(plan, task, available_tools)
-        final_raw = slot_score + macro_creation + macro_usage + efficiency_score
+        final_raw = slot_score + macro_creation + macro_usage + macro_miss_penalty + efficiency_score
 
     final_reward = max(FINAL_REWARD_MIN, min(FINAL_REWARD_MAX, final_raw))
 
@@ -454,6 +509,7 @@ def compute_step_reward(
         "slot_score": slot_score,
         "macro_creation": macro_creation,
         "macro_usage": macro_usage,
+        "macro_miss_penalty": macro_miss_penalty,
         "efficiency_score": efficiency_score,
         "final_reward": final_reward,
     }
