@@ -6,7 +6,7 @@ Thin orchestration layer that chains the plan evaluation logic.
 Pipeline flow:
 1. run_sanity_validation(...)
 2. run_slot_judgment(...)
-3. compute_step_reward(...)  — slot score + macro bonuses + efficiency
+3. derive reward inputs and delegate reward policy to rubrics.py
 
 Short-circuits if validation fails, or if harmful calls are present.
 Final reward is bounded to [-0.2, 1.0].
@@ -19,16 +19,46 @@ from typing import Dict, List, Optional
 
 from models import PipelineResult, Task, Tool, ToolCall
 from server.evaluation.plan_evaluator import (
+    calculate_dynamic_baseline_tokens,
+    count_prior_sequence_occurrences,
     get_relevant_slots,
     run_sanity_validation,
     run_slot_judgment,
-    compute_step_reward,
     VALIDATION_PENALTY,
     FINAL_REWARD_MIN,
 )
+from rubrics import compute_toolforge_reward_breakdown
 
 
 logger = logging.getLogger(__name__)
+
+
+def _count_macro_misses(plan: List[ToolCall], accepted_macros: List[Tool]) -> int:
+    """Count atomic sequences in the plan that match accepted macros."""
+    if not accepted_macros:
+        return 0
+
+    plan_tool_names = [call.tool_name for call in plan]
+    miss_count = 0
+
+    for macro in accepted_macros:
+        if not macro.steps:
+            continue
+
+        macro_seq = [call.tool_name for call in macro.steps]
+        seq_len = len(macro_seq)
+        if seq_len < 2 or seq_len > len(plan_tool_names):
+            continue
+
+        i = 0
+        while i <= len(plan_tool_names) - seq_len:
+            if plan_tool_names[i:i + seq_len] == macro_seq:
+                miss_count += 1
+                i += seq_len
+            else:
+                i += 1
+
+    return miss_count
 
 
 def _ensure_reward_file_logger() -> None:
@@ -110,6 +140,11 @@ def run_evaluation_pipeline(
             step_slot_ratio=0.0,
             step_task_complete=False,
             step_harmful=False,
+            step_macro_prior_count=None,
+            step_macro_used=False,
+            step_macro_miss_count=0,
+            step_baseline_calls=task.baseline_call_count,
+            step_actual_calls=len(plan),
             step_macro_creation_bonus=0.0,
             step_macro_usage_bonus=0.0,
             step_macro_miss_penalty=0.0,
@@ -145,6 +180,11 @@ def run_evaluation_pipeline(
             step_slot_ratio=0.0,
             step_task_complete=False,
             step_harmful=True,
+            step_macro_prior_count=None,
+            step_macro_used=False,
+            step_macro_miss_count=0,
+            step_baseline_calls=task.baseline_call_count,
+            step_actual_calls=len(plan),
             step_macro_creation_bonus=0.0,
             step_macro_usage_bonus=0.0,
             step_macro_miss_penalty=0.0,
@@ -164,24 +204,51 @@ def run_evaluation_pipeline(
             step_slot_ratio=0.0,
             step_task_complete=False,
             step_harmful=False,
+            step_macro_prior_count=None,
+            step_macro_used=False,
+            step_macro_miss_count=0,
+            step_baseline_calls=task.baseline_call_count,
+            step_actual_calls=len(plan),
             step_macro_creation_bonus=0.0,
             step_macro_usage_bonus=0.0,
             step_macro_miss_penalty=0.0,
             step_efficiency_score=0.0,
         )
 
-    # 3. Compute step reward (slot score + macro bonuses + efficiency)
-    reward_breakdown = compute_step_reward(
-        slot_judgment=slot_judgment,
-        task=task,
-        plan=plan,
-        available_tools=available_tools,
-        accepted_macros=accepted_macros,
-        macro_proposal=macro_proposal,
-        sequence_counts=sequence_counts,
+    n_required = len(task.required_slots)
+    n_filled = len(slot_judgment.slots_filled)
+    slot_ratio = n_filled / n_required if n_required > 0 else 1.0
+
+    macro_prior_count = None
+    if (
+        macro_proposal is not None
+        and sequence_counts is not None
+        and macro_proposal.steps
+        and len(macro_proposal.steps) >= 2
+    ):
+        proposed_sequence = tuple(call.tool_name for call in macro_proposal.steps)
+        macro_prior_count = count_prior_sequence_occurrences(proposed_sequence, sequence_counts)
+
+    macro_names = {macro.name for macro in accepted_macros}
+    macro_used = any(call.tool_name in macro_names for call in plan)
+    macro_miss_count = _count_macro_misses(plan, accepted_macros)
+    baseline_calls = calculate_dynamic_baseline_tokens(task, available_tools)
+    actual_calls = len(plan)
+
+    reward_breakdown = compute_toolforge_reward_breakdown(
+        {
+            "validation_result": validation.model_dump(),
+            "slot_ratio": slot_ratio,
+            "harmful_calls_present": slot_judgment.harmful_calls_present,
+            "judge_failed": bool(getattr(slot_judgment, "judge_failed", False)),
+            "macro_prior_count": macro_prior_count,
+            "macro_used": macro_used,
+            "macro_miss_count": macro_miss_count,
+            "baseline_calls": baseline_calls,
+            "actual_calls": actual_calls,
+        }
     )
 
-    slot_ratio = reward_breakdown["slot_ratio"]
     slot_score = reward_breakdown["slot_score"]
     macro_creation = reward_breakdown["macro_creation"]
     macro_usage = reward_breakdown["macro_usage"]
@@ -223,6 +290,11 @@ def run_evaluation_pipeline(
         step_slot_ratio=slot_ratio,
         step_task_complete=slot_judgment.task_complete,
         step_harmful=False,
+        step_macro_prior_count=macro_prior_count,
+        step_macro_used=macro_used,
+        step_macro_miss_count=macro_miss_count,
+        step_baseline_calls=baseline_calls,
+        step_actual_calls=actual_calls,
         step_macro_creation_bonus=macro_creation,
         step_macro_usage_bonus=macro_usage,
         step_macro_miss_penalty=macro_miss_penalty,
