@@ -46,7 +46,7 @@ def advance_to_next_task(state: ToolForgeState, input_provider: Optional[InputPr
     next_task = get_next_task_from_generator(input_provider)
     state.current_task = next_task
     logger.info(
-        "Task advanced from '%s' to '%s'. Remaining tasks=%d",
+        "Task advanced from '%s' to '%s'.",
         completed_task_id,
         next_task.id,
     )
