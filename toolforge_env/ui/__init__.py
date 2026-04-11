@@ -13,9 +13,9 @@ Exposes three tab builders:
     - build_hvl_tab     : Tab 3 — Human vs LLM (interactive game)
 """
 
-from toolforge_env.ui.demo_tab import build_demo_tab
-from toolforge_env.ui.byoa_tab import build_byoa_tab
-from toolforge_env.ui.hvl_tab  import build_hvl_tab
+from ui.demo_tab import build_demo_tab
+from ui.byoa_tab import build_byoa_tab
+from ui.hvl_tab  import build_hvl_tab
 
 __all__ = [
     "build_demo_tab",

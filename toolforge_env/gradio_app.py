@@ -23,7 +23,7 @@ Usage:
     gradio toolforge_env/gradio_app.py
 
     # Or import the `demo` object for programmatic mounting:
-    from toolforge_env.gradio_app import demo
+    from gradio_app import demo
     demo.launch(server_port=7860)
 
 Environment Variables:
@@ -44,10 +44,10 @@ import os
 
 import gradio as gr
 
-from toolforge_env.ui.shared import CUSTOM_CSS
-from toolforge_env.ui.demo_tab import build_demo_tab
-from toolforge_env.ui.byoa_tab import build_byoa_tab
-from toolforge_env.ui.hvl_tab  import build_hvl_tab
+from ui.shared import CUSTOM_CSS
+from ui.demo_tab import build_demo_tab
+from ui.byoa_tab import build_byoa_tab
+from ui.hvl_tab  import build_hvl_tab
 
 # ---------------------------------------------------------------------------
 # Logging configuration

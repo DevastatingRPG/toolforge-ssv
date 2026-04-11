@@ -42,6 +42,7 @@ except ModuleNotFoundError:
     from ..models import ToolForgeAction, ToolForgeObservation
     from .toolforge_env_environment import ToolforgeEnvironment
 
+from gradio_app import build_app
 
 # Create the app with web interface and README integration
 app = create_app(
@@ -49,6 +50,7 @@ app = create_app(
     ToolForgeAction,
     ToolForgeObservation,
     env_name="toolforge_env",
+    gradio_builder=build_app,
     max_concurrent_envs=1,  # increase this number to allow more concurrent WebSocket sessions
 )
 

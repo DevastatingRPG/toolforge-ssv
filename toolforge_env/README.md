@@ -39,8 +39,8 @@ ToolForge goes beyond simple tool execution benchmarks. It evaluates an agent's 
 ## Quick Start
 
 ```python
-from toolforge_env.toolforge_env_environment import ToolforgeEnvironment
-from toolforge_env.models import ToolForgeAction, ToolCall, Tool
+from toolforge_env_environment import ToolforgeEnvironment
+from models import ToolForgeAction, ToolCall, Tool
 
 env = ToolforgeEnvironment()
 result = env.reset(mode="eval", difficulty="easy")
