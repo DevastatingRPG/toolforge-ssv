@@ -39,7 +39,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import gradio as gr
 
-from toolforge_env.ui.shared import (
+from ui.shared import (
     ATOMIC_TOOLS,
     TOOL_DESCRIPTIONS,
     render_macro_library_html,

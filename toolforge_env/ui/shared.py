@@ -5,28 +5,39 @@
 # LICENSE file in the root directory of this source tree.
 
 """
-Shared data, constants, and CSS for the ToolForge Gradio UI.
+ui/shared.py — Shared data, constants, and HTML renderers for the ToolForge Gradio UI.
 
-Owns:
-    - SYSTEM_PROMPT       : The default agent system prompt (editable in BYOA tab)
-    - ATOMIC_TOOLS        : List of all atomic tool names available to agents
-    - SCRIPTED_PROFILES   : Pre-scripted behavioral profiles used in Demo Mode
-    - CUSTOM_CSS          : Global CSS injected into the Gradio app
-    - Helper formatters   : Pure functions that render episode frames as HTML
+Import pattern (runs from toolforge_env/ dir — no toolforge_env prefix):
+    from ui.shared import SCRIPTED_PROFILES, render_plan_html, ...
 
-Episode frame schema (dict):
-    task_id          (str)             task identifier
-    task_prompt      (str)             task description shown to agent
-    difficulty       (str)             "easy" | "medium" | "hard"
-    required_slots   (list[str])       semantic slots the task requires
-    plan             (list[str])       ordered tool names in the agent's plan
-    used_macro       (bool)            True if the plan contains a macro call
-    macro_proposed   (dict | None)     {"name": str, "steps": list[str]} or None
-    reward           (float)           step reward in [-0.2, 1.0]
-    turns_used       (int)             actual length of the plan
-    turns_baseline   (int)             baseline_call_count for the task
-    macros_so_far    (list[dict])      cumulative macro library after this step
-    note             (str)             narrative explaining agent behaviour
+What lives here:
+    SYSTEM_PROMPT       : Default agent system prompt (editable in BYOA tab)
+    ATOMIC_TOOLS        : Tool names (mirror of server/tools.py — no server import needed)
+    TOOL_DESCRIPTIONS   : Human-readable tool descriptions for HvL tool picker
+    SCRIPTED_PROFILES   : Pre-scripted agent plans per model × difficulty × episode × step
+    render_*            : Pure HTML-rendering functions (no Gradio imports)
+    CUSTOM_CSS          : Global CSS string injected into gr.Blocks
+
+SCRIPTED_PROFILES structure:
+    model_label (str)
+      → difficulty (str: "easy" | "medium" | "hard")
+        → List[Episode]
+
+    Episode = {
+        "episode_id"    : str   — passed to env_reset() as task_id
+        "episode_label" : str   — human-readable name shown in progress bar
+        "steps"         : List[StepScript]
+    }
+
+    StepScript = {
+        "plan"           : List[str]        — ordered tool names the agent proposes
+        "macro_proposed" : dict | None      — {"name": str, "steps": List[str]} or None
+        "note"           : str              — narrative annotation shown in the UI
+    }
+
+Note: rewards, task prompts, and macro state are NOT stored here.
+They come from the real environment via env_client.env_step() / env_reset().
+The scripted profiles only prescribe which plan each model "would" submit.
 """
 
 import logging
@@ -42,8 +53,8 @@ logger = logging.getLogger(__name__)
 # SECTION 1: AGENT SYSTEM PROMPT
 # ---------------------------------------------------------------------------
 # Copied verbatim from inference.py so the BYOA tab pre-fills the correct
-# prompt.  Users MAY edit the strategy section; the JSON-response requirement
-# (bottom of the prompt) is locked by the parser and must not be removed.
+# prompt.  Users may edit the strategy section.  The ⚠️ line and everything
+# below it must NOT be removed — it will break the server-side JSON parser.
 # ===========================================================================
 
 SYSTEM_PROMPT: str = textwrap.dedent(
@@ -75,12 +86,7 @@ SYSTEM_PROMPT: str = textwrap.dedent(
     - Good reusable patterns include deploy->healthcheck->notify, restart->healthcheck->notify,
       rollback->healthcheck->notify, rollback->restart->healthcheck, scale->healthcheck->notify,
       and restart->deploy->healthcheck.
-    - Some tasks are intentionally varied in wording; still group them by the same underlying
-      tool-order signature.
-    - This evaluator often treats each plan entry as filling at most one required slot.
-    - Therefore, avoid macro-only one-entry plans for multi-slot tasks.
-    - If task.required_slots has length N, prefer a plan with at least N entries, mixing macro
-      calls with needed atomic calls.
+    - If task.required_slots has length N, prefer a plan with at least N entries.
 
     Naming:
     - Use short snake_case names that describe the operation pattern.
@@ -92,12 +98,13 @@ SYSTEM_PROMPT: str = textwrap.dedent(
 ).strip()
 
 # ===========================================================================
-# SECTION 2: ATOMIC TOOL INVENTORY
+# SECTION 2: TOOL INVENTORY
 # ---------------------------------------------------------------------------
-# These mirror server/tools.py.  Kept here so UI files never import from
-# the server layer, preserving the clean UI/backend boundary.
+# Mirrors server/tools.py without importing from the server layer.
+# UI files reference this list instead of importing build_atomic_tools().
 # ===========================================================================
 
+# Ordered list of all atomic tool names
 ATOMIC_TOOLS: List[str] = [
     "deploy",
     "patch",
@@ -111,7 +118,7 @@ ATOMIC_TOOLS: List[str] = [
     "restart",
 ]
 
-# Human-readable descriptions for each atomic tool (shown in HvL tool picker)
+# Human-readable descriptions for each atomic tool (HvL tab tool picker)
 TOOL_DESCRIPTIONS: Dict[str, str] = {
     "deploy":          "Deploy a service / application version",
     "patch":           "Apply security patches or hotfixes",
@@ -128,434 +135,342 @@ TOOL_DESCRIPTIONS: Dict[str, str] = {
 # ===========================================================================
 # SECTION 3: SCRIPTED BEHAVIORAL PROFILES
 # ---------------------------------------------------------------------------
-# Each profile is keyed by MODEL_LABEL -> DIFFICULTY -> list[episode_frame].
+# Each profile prescribes ONLY the plan (and optional macro_proposal) for
+# each step.  Rewards, task prompts, and macro state come from the real env.
 #
-# Episode frames are purely presentational data — they do NOT call the real
-# environment.  They simulate what a real agent run would look like so the
-# Demo tab can function without any API key.
+# Episode "episode_id" must match a valid task_id accepted by env_reset():
+#   "easy-deployment-sprints"   "easy-resource-management"  "easy-rollback-drills"
+#   "medium-traffic-readiness"  "medium-incident-response"  ...
+#   "hard-project-legacy-migration"  "hard-project-zero-trust"
 #
-# Narrative arc per profile:
-#   GPT-4o   : Fast learner — proposes macro by episode 3, reuses it by 4.
-#   Llama 3  : Moderate learner — one unnecessary call early, late macro.
-#   Mistral  : Inconsistent — one harmful call (negative reward), eventual macro.
+# The number of steps in a scripted episode should match the number of tasks
+# in the corresponding task group in tasks.py.  If the env returns done=True
+# before the scripted steps are exhausted, the UI will stop stepping.
 # ===========================================================================
 
 SCRIPTED_PROFILES: Dict[str, Dict[str, List[Dict[str, Any]]]] = {
 
     # -----------------------------------------------------------------------
-    # Profile 1 — GPT-4o (simulated) | Fast, efficient macro learner
+    # GPT-4o (simulated) — Fast learner: proposes macro by step 3, reuses by 4
     # -----------------------------------------------------------------------
     "GPT-4o (simulated)": {
         "easy": [
+            # ---- Episode 1: easy-deployment-sprints (4 tasks) -------------
             {
-                "task_id":       "e-dep-1",
-                "task_prompt":   "Release 'inventory-db-proxy' v1.0.5, check health status, and notify #product.",
-                "difficulty":    "easy",
-                "required_slots": ["deployment_execution", "deployment_verification", "deployment_notification"],
-                "plan":          ["deploy", "healthcheck", "notify"],
-                "used_macro":    False,
-                "macro_proposed": None,
-                "reward":        0.65,
-                "turns_used":    3,
-                "turns_baseline": 3,
-                "macros_so_far": [],
-                "note":          "Agent executes the canonical 3-step deployment pipeline correctly.",
-            },
-            {
-                "task_id":       "e-dep-2",
-                "task_prompt":   "Roll out 'auth-svc' v1.8.0, check health, and notify #ops-chat.",
-                "difficulty":    "easy",
-                "required_slots": ["deployment_execution", "deployment_verification", "deployment_notification"],
-                "plan":          ["deploy", "healthcheck", "notify"],
-                "used_macro":    False,
-                "macro_proposed": None,
-                "reward":        0.65,
-                "turns_used":    3,
-                "turns_baseline": 3,
-                "macros_so_far": [],
-                "note":          "Same pattern repeated. Agent internally tracks this sequence.",
-            },
-            {
-                "task_id":       "e-dep-3",
-                "task_prompt":   "Deploy 'api-v2' v2.3.4, check health status, and notify #support.",
-                "difficulty":    "easy",
-                "required_slots": ["deployment_execution", "deployment_verification", "deployment_notification"],
-                "plan":          ["deploy", "healthcheck", "notify"],
-                "used_macro":    False,
-                "macro_proposed": {
-                    "name":  "deploy_verify_notify",
-                    "steps": ["deploy", "healthcheck", "notify"],
-                },
-                "reward":        0.83,
-                "turns_used":    3,
-                "turns_baseline": 3,
-                "macros_so_far": [
-                    {"name": "deploy_verify_notify", "steps": ["deploy", "healthcheck", "notify"]},
+                "episode_id":    "easy-deployment-sprints",
+                "episode_label": "Deployment Sprints",
+                "steps": [
+                    {
+                        "plan":           ["deploy", "healthcheck", "notify"],
+                        "macro_proposed": None,
+                        "note":           "Agent executes the canonical 3-step deployment pipeline correctly.",
+                    },
+                    {
+                        "plan":           ["deploy", "healthcheck", "notify"],
+                        "macro_proposed": None,
+                        "note":           "Same pattern repeated. Agent internally tracks this sequence.",
+                    },
+                    {
+                        "plan":           ["deploy", "healthcheck", "notify"],
+                        "macro_proposed": {
+                            "name":  "deploy_verify_notify",
+                            "steps": ["deploy", "healthcheck", "notify"],
+                        },
+                        "note": (
+                            "Pattern seen 3 times. Agent proposes macro 'deploy_verify_notify'. "
+                            "Macro creation bonus applied on top of slot score."
+                        ),
+                    },
+                    {
+                        "plan":           ["deploy_verify_notify"],
+                        "macro_proposed": None,
+                        "note": (
+                            "Agent reuses 'deploy_verify_notify'. 2 turns saved vs baseline. "
+                            "Macro usage bonus and efficiency score both applied."
+                        ),
+                    },
                 ],
-                "note":          "Pattern seen 3 times. Agent proposes macro 'deploy_verify_notify'. "
-                                 "Macro creation bonus (+0.18) applied on top of slot score.",
             },
+
+            # ---- Episode 2: easy-resource-management (macros reset) -------
             {
-                "task_id":       "e-dep-4",
-                "task_prompt":   "Release 'image-processor' v2.7.4, check health, and notify #security.",
-                "difficulty":    "easy",
-                "required_slots": ["deployment_execution", "deployment_verification", "deployment_notification"],
-                "plan":          ["deploy_verify_notify"],
-                "used_macro":    True,
-                "macro_proposed": None,
-                "reward":        0.90,
-                "turns_used":    1,
-                "turns_baseline": 3,
-                "macros_so_far": [
-                    {"name": "deploy_verify_notify", "steps": ["deploy", "healthcheck", "notify"]},
+                "episode_id":    "easy-resource-management",
+                "episode_label": "Resource Management",
+                "steps": [
+                    {
+                        "plan":           ["scale", "ping", "notify"],
+                        "macro_proposed": None,
+                        "note":           "New episode — macros reset by env. New pattern (scale→ping→notify).",
+                    },
+                    {
+                        "plan":           ["restart", "healthcheck", "notify"],
+                        "macro_proposed": {
+                            "name":  "restart_check_notify",
+                            "steps": ["restart", "healthcheck", "notify"],
+                        },
+                        "note": "Agent proposes 'restart_check_notify' for the restart→healthcheck→notify pattern.",
+                    },
                 ],
-                "note":          "Agent reuses 'deploy_verify_notify'. 2 turns saved vs baseline. "
-                                 "Macro usage bonus (+0.05) and efficiency score (+0.50) both applied.",
-            },
-            {
-                "task_id":       "e-res-1",
-                "task_prompt":   "Scale 'websocket-server' to 6, ping it to ensure connectivity, and notify #monitoring.",
-                "difficulty":    "easy",
-                "required_slots": ["scaling_execution", "scaling_verification", "scaling_notification"],
-                "plan":          ["scale", "ping", "notify"],
-                "used_macro":    False,
-                "macro_proposed": None,
-                "reward":        0.65,
-                "turns_used":    3,
-                "turns_baseline": 3,
-                "macros_so_far": [
-                    {"name": "deploy_verify_notify", "steps": ["deploy", "healthcheck", "notify"]},
-                ],
-                "note":          "New pattern (scale→ping→notify). Agent starts tracking this sequence.",
-            },
-            {
-                "task_id":       "e-res-2",
-                "task_prompt":   "Restart 'redis-cache', check health, and notify #db-team.",
-                "difficulty":    "easy",
-                "required_slots": ["restart_execution", "restart_verification", "restart_notification"],
-                "plan":          ["restart", "healthcheck", "notify"],
-                "used_macro":    False,
-                "macro_proposed": {
-                    "name":  "restart_check_notify",
-                    "steps": ["restart", "healthcheck", "notify"],
-                },
-                "reward":        0.83,
-                "turns_used":    3,
-                "turns_baseline": 3,
-                "macros_so_far": [
-                    {"name": "deploy_verify_notify",  "steps": ["deploy",  "healthcheck", "notify"]},
-                    {"name": "restart_check_notify",  "steps": ["restart", "healthcheck", "notify"]},
-                ],
-                "note":          "Agent generalises macro learning. Proposes 'restart_check_notify' "
-                                 "for the restart→healthcheck→notify pattern.",
             },
         ],
     },
 
     # -----------------------------------------------------------------------
-    # Profile 2 — Llama 3 (simulated) | Moderate learner, one wasteful call
+    # Llama 3 (simulated) — Moderate: one unnecessary call, late macro
     # -----------------------------------------------------------------------
     "Llama 3 (simulated)": {
         "easy": [
+            # ---- Episode 1: easy-deployment-sprints -----------------------
             {
-                "task_id":       "e-dep-1",
-                "task_prompt":   "Release 'inventory-db-proxy' v1.0.5, check health status, and notify #product.",
-                "difficulty":    "easy",
-                "required_slots": ["deployment_execution", "deployment_verification", "deployment_notification"],
-                "plan":          ["deploy", "healthcheck", "notify"],
-                "used_macro":    False,
-                "macro_proposed": None,
-                "reward":        0.63,
-                "turns_used":    3,
-                "turns_baseline": 3,
-                "macros_so_far": [],
-                "note":          "Correct but slightly lower slot score from conservative LLM reasoning.",
-            },
-            {
-                "task_id":       "e-dep-2",
-                "task_prompt":   "Roll out 'auth-svc' v1.8.0, check health, and notify #ops-chat.",
-                "difficulty":    "easy",
-                "required_slots": ["deployment_execution", "deployment_verification", "deployment_notification"],
-                "plan":          ["deploy", "run_tests", "healthcheck", "notify"],
-                "used_macro":    False,
-                "macro_proposed": None,
-                "reward":        0.52,
-                "turns_used":    4,
-                "turns_baseline": 3,
-                "macros_so_far": [],
-                "note":          "Agent added 'run_tests' unnecessarily. 4 calls vs baseline 3. "
-                                 "Harmless but reduces efficiency score.",
-            },
-            {
-                "task_id":       "e-dep-3",
-                "task_prompt":   "Deploy 'api-v2' v2.3.4, check health status, and notify #support.",
-                "difficulty":    "easy",
-                "required_slots": ["deployment_execution", "deployment_verification", "deployment_notification"],
-                "plan":          ["deploy", "healthcheck", "notify"],
-                "used_macro":    False,
-                "macro_proposed": None,
-                "reward":        0.63,
-                "turns_used":    3,
-                "turns_baseline": 3,
-                "macros_so_far": [],
-                "note":          "Back to correct atomic plan. Macro opportunity missed again.",
-            },
-            {
-                "task_id":       "e-dep-4",
-                "task_prompt":   "Release 'image-processor' v2.7.4, check health, and notify #security.",
-                "difficulty":    "easy",
-                "required_slots": ["deployment_execution", "deployment_verification", "deployment_notification"],
-                "plan":          ["deploy", "healthcheck", "notify"],
-                "used_macro":    False,
-                "macro_proposed": {
-                    "name":  "deploy_pipeline",
-                    "steps": ["deploy", "healthcheck", "notify"],
-                },
-                "reward":        0.75,
-                "turns_used":    3,
-                "turns_baseline": 3,
-                "macros_so_far": [
-                    {"name": "deploy_pipeline", "steps": ["deploy", "healthcheck", "notify"]},
+                "episode_id":    "easy-deployment-sprints",
+                "episode_label": "Deployment Sprints",
+                "steps": [
+                    {
+                        "plan":           ["deploy", "healthcheck", "notify"],
+                        "macro_proposed": None,
+                        "note":           "Correct but slightly lower slot score from conservative LLM reasoning.",
+                    },
+                    {
+                        "plan":           ["deploy", "run_tests", "healthcheck", "notify"],
+                        "macro_proposed": None,
+                        "note": (
+                            "Agent added 'run_tests' unnecessarily. 4 calls vs baseline 3. "
+                            "Harmless but reduces efficiency score."
+                        ),
+                    },
+                    {
+                        "plan":           ["deploy", "healthcheck", "notify"],
+                        "macro_proposed": None,
+                        "note":           "Back to correct atomic plan. Macro opportunity missed again.",
+                    },
+                    {
+                        "plan":           ["deploy", "healthcheck", "notify"],
+                        "macro_proposed": {
+                            "name":  "deploy_pipeline",
+                            "steps": ["deploy", "healthcheck", "notify"],
+                        },
+                        "note":           "Late macro recognition on step 4. Still earns creation bonus.",
+                    },
                 ],
-                "note":          "Late macro recognition on episode 4. Still earns creation bonus.",
             },
+
+            # ---- Episode 2: easy-resource-management ----------------------
             {
-                "task_id":       "e-res-1",
-                "task_prompt":   "Scale 'websocket-server' to 6, ping it to ensure connectivity, and notify #monitoring.",
-                "difficulty":    "easy",
-                "required_slots": ["scaling_execution", "scaling_verification", "scaling_notification"],
-                "plan":          ["scale", "ping", "notify"],
-                "used_macro":    False,
-                "macro_proposed": None,
-                "reward":        0.63,
-                "turns_used":    3,
-                "turns_baseline": 3,
-                "macros_so_far": [
-                    {"name": "deploy_pipeline", "steps": ["deploy", "healthcheck", "notify"]},
+                "episode_id":    "easy-resource-management",
+                "episode_label": "Resource Management",
+                "steps": [
+                    {
+                        "plan":           ["scale", "ping", "notify"],
+                        "macro_proposed": None,
+                        "note":           "New episode — macros reset. New slot pattern.",
+                    },
+                    {
+                        "plan":           ["restart", "healthcheck", "notify"],
+                        "macro_proposed": None,
+                        "note":           "Agent completes correctly but doesn't propose a second macro yet.",
+                    },
                 ],
-                "note":          "New slot pattern. Agent does not yet reuse deploy_pipeline (correct).",
-            },
-            {
-                "task_id":       "e-res-2",
-                "task_prompt":   "Restart 'redis-cache', check health, and notify #db-team.",
-                "difficulty":    "easy",
-                "required_slots": ["restart_execution", "restart_verification", "restart_notification"],
-                "plan":          ["restart", "healthcheck", "notify"],
-                "used_macro":    False,
-                "macro_proposed": None,
-                "reward":        0.63,
-                "turns_used":    3,
-                "turns_baseline": 3,
-                "macros_so_far": [
-                    {"name": "deploy_pipeline", "steps": ["deploy", "healthcheck", "notify"]},
-                ],
-                "note":          "Agent completes correctly but doesn't propose a second macro yet.",
             },
         ],
     },
 
     # -----------------------------------------------------------------------
-    # Profile 3 — Mistral (simulated) | Inconsistent, one harmful call
+    # Mistral (simulated) — Inconsistent: incomplete plan, one harmful call
     # -----------------------------------------------------------------------
     "Mistral (simulated)": {
         "easy": [
+            # ---- Episode 1: easy-deployment-sprints -----------------------
             {
-                "task_id":       "e-dep-1",
-                "task_prompt":   "Release 'inventory-db-proxy' v1.0.5, check health status, and notify #product.",
-                "difficulty":    "easy",
-                "required_slots": ["deployment_execution", "deployment_verification", "deployment_notification"],
-                "plan":          ["deploy", "notify"],
-                "used_macro":    False,
-                "macro_proposed": None,
-                "reward":        0.38,
-                "turns_used":    2,
-                "turns_baseline": 3,
-                "macros_so_far": [],
-                "note":          "Missed 'healthcheck' (deployment_verification slot unfilled). "
-                                 "slot_ratio = 0.67 — above threshold but incomplete.",
-            },
-            {
-                "task_id":       "e-dep-2",
-                "task_prompt":   "Roll out 'auth-svc' v1.8.0, check health, and notify #ops-chat.",
-                "difficulty":    "easy",
-                "required_slots": ["deployment_execution", "deployment_verification", "deployment_notification"],
-                "plan":          ["deploy", "healthcheck", "notify"],
-                "used_macro":    False,
-                "macro_proposed": None,
-                "reward":        0.65,
-                "turns_used":    3,
-                "turns_baseline": 3,
-                "macros_so_far": [],
-                "note":          "Correct full plan this time.",
-            },
-            {
-                "task_id":       "e-dep-3",
-                "task_prompt":   "Deploy 'api-v2' v2.3.4, check health status, and notify #support.",
-                "difficulty":    "easy",
-                "required_slots": ["deployment_execution", "deployment_verification", "deployment_notification"],
-                "plan":          ["rollback", "healthcheck", "notify"],
-                "used_macro":    False,
-                "macro_proposed": None,
-                "reward":        -0.10,
-                "turns_used":    3,
-                "turns_baseline": 3,
-                "macros_so_far": [],
-                "note":          "⚠️ HARMFUL CALL: 'rollback' during a deployment task is destructive. "
-                                 "Pipeline short-circuited. Penalty applied.",
-            },
-            {
-                "task_id":       "e-dep-4",
-                "task_prompt":   "Release 'image-processor' v2.7.4, check health, and notify #security.",
-                "difficulty":    "easy",
-                "required_slots": ["deployment_execution", "deployment_verification", "deployment_notification"],
-                "plan":          ["deploy", "healthcheck", "notify"],
-                "used_macro":    False,
-                "macro_proposed": None,
-                "reward":        0.65,
-                "turns_used":    3,
-                "turns_baseline": 3,
-                "macros_so_far": [],
-                "note":          "Recovery. Correct plan, no macro proposed.",
-            },
-            {
-                "task_id":       "e-res-1",
-                "task_prompt":   "Scale 'websocket-server' to 6, ping it to ensure connectivity, and notify #monitoring.",
-                "difficulty":    "easy",
-                "required_slots": ["scaling_execution", "scaling_verification", "scaling_notification"],
-                "plan":          ["scale", "ping", "notify"],
-                "used_macro":    False,
-                "macro_proposed": None,
-                "reward":        0.65,
-                "turns_used":    3,
-                "turns_baseline": 3,
-                "macros_so_far": [],
-                "note":          "Correct plan on new pattern.",
-            },
-            {
-                "task_id":       "e-res-2",
-                "task_prompt":   "Restart 'redis-cache', check health, and notify #db-team.",
-                "difficulty":    "easy",
-                "required_slots": ["restart_execution", "restart_verification", "restart_notification"],
-                "plan":          ["restart", "healthcheck", "notify"],
-                "used_macro":    False,
-                "macro_proposed": {
-                    "name":  "op_and_notify",
-                    "steps": ["restart", "healthcheck", "notify"],
-                },
-                "reward":        0.80,
-                "turns_used":    3,
-                "turns_baseline": 3,
-                "macros_so_far": [
-                    {"name": "op_and_notify", "steps": ["restart", "healthcheck", "notify"]},
+                "episode_id":    "easy-deployment-sprints",
+                "episode_label": "Deployment Sprints",
+                "steps": [
+                    {
+                        "plan":           ["deploy", "notify"],
+                        "macro_proposed": None,
+                        "note": (
+                            "Missed 'healthcheck' (deployment_verification slot unfilled). "
+                            "slot_ratio = 0.67 — above threshold but incomplete."
+                        ),
+                    },
+                    {
+                        "plan":           ["deploy", "healthcheck", "notify"],
+                        "macro_proposed": None,
+                        "note":           "Correct full plan this time.",
+                    },
+                    {
+                        "plan":           ["rollback", "healthcheck", "notify"],
+                        "macro_proposed": None,
+                        "note": (
+                            "⚠️ HARMFUL CALL: 'rollback' during a deployment task is destructive. "
+                            "Pipeline short-circuited. Penalty applied by env."
+                        ),
+                    },
+                    {
+                        "plan":           ["deploy", "healthcheck", "notify"],
+                        "macro_proposed": None,
+                        "note":           "Recovery. Correct plan, no macro proposed.",
+                    },
                 ],
-                "note":          "Recovers strongly. Proposes a macro on episode 6.",
+            },
+
+            # ---- Episode 2: easy-resource-management ----------------------
+            {
+                "episode_id":    "easy-resource-management",
+                "episode_label": "Resource Management",
+                "steps": [
+                    {
+                        "plan":           ["scale", "ping", "notify"],
+                        "macro_proposed": None,
+                        "note":           "New episode — macros reset. Correct plan on new pattern.",
+                    },
+                    {
+                        "plan":           ["restart", "healthcheck", "notify"],
+                        "macro_proposed": {
+                            "name":  "op_and_notify",
+                            "steps": ["restart", "healthcheck", "notify"],
+                        },
+                        "note":           "Recovers strongly. Proposes a macro on step 2 of episode 2.",
+                    },
+                ],
             },
         ],
     },
 }
 
 # ===========================================================================
-# SECTION 4: HTML / CSS HELPERS
+# SECTION 4: HTML RENDERERS
 # ---------------------------------------------------------------------------
-# Pure rendering functions used by multiple tabs.  No Gradio imports here —
-# these return plain HTML strings.
+# Pure functions that produce HTML strings for gr.HTML components.
+# No Gradio imports here — these are safe to call from any thread.
 # ===========================================================================
 
-def render_tools_html(tools: List[str], macros: List[Dict[str, Any]]) -> str:
+def render_tools_html(
+    atomic_tool_names: List[str],
+    macros: List[Dict[str, Any]],
+) -> str:
     """
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     render_tools_html
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    Render the available-tools list as colour-coded HTML.
+    Render the available-tools list as colour-coded HTML badges.
 
-    Atomic tools appear in a neutral badge.
-    Macro tools appear in a highlighted accent badge with a ⚙ icon.
+    Atomic tools   → neutral grey badge.
+    Macro tools    → purple badge with ⚙ icon + step preview inline.
 
     Args:
-        tools   : List of atomic tool names currently available.
-        macros  : Cumulative list of accepted macro dicts (name, steps).
+        atomic_tool_names : Names of atomic tools (from ATOMIC_TOOLS or env obs).
+        macros            : Accepted macro dicts with "name" and "steps" keys.
+                            Comes from env_client.extract_macros().
 
     Returns:
-        HTML string ready for gr.HTML component.
+        HTML string ready for gr.HTML.
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     """
-    # Build set of macro names for quick membership testing
-    macro_names = {m["name"] for m in macros}
-
-    # Accumulate badge HTML for each tool
+    # Atomic badges
     badges_html = ""
-    for tool in tools:
-        if tool in macro_names:
-            # Macro badge — accent colour with gear icon
-            badges_html += (
-                f'<span style="display:inline-block;margin:3px 4px;padding:4px 10px;'
-                f'border-radius:12px;background:#7c3aed;color:#fff;font-size:0.82em;font-weight:600;">'
-                f'⚙ {tool}</span>'
-            )
-        else:
-            # Atomic badge — neutral grey
-            badges_html += (
-                f'<span style="display:inline-block;margin:3px 4px;padding:4px 10px;'
-                f'border-radius:12px;background:#374151;color:#d1d5db;font-size:0.82em;">'
-                f'{tool}</span>'
-            )
+    for tool in atomic_tool_names:
+        badges_html += (
+            f'<span style="display:inline-block;margin:3px 4px;padding:4px 10px;'
+            f'border-radius:12px;background:#374151;color:#d1d5db;font-size:0.82em;">'
+            f'{tool}</span>'
+        )
 
-    # Add each macro at the end as its own highlighted entry
-    for macro in macros:
-        if macro["name"] not in tools:  # avoid double-showing if already in tools list
+    # Macro section
+    if macros:
+        badges_html += (
+            '<div style="margin-top:10px;margin-bottom:2px;'
+            'color:#a78bfa;font-size:0.78em;font-weight:700;letter-spacing:0.03em;">'
+            '⚙ Macros in library:</div>'
+        )
+        for macro in macros:
+            steps_preview = " → ".join(macro.get("steps", []))
             badges_html += (
-                f'<span style="display:inline-block;margin:3px 4px;padding:4px 10px;'
-                f'border-radius:12px;background:#7c3aed;color:#fff;font-size:0.82em;font-weight:600;">'
-                f'⚙ {macro["name"]}</span>'
+                f'<div style="display:flex;align-items:center;gap:8px;margin:4px 0;">'
+                f'<span style="padding:4px 12px;border-radius:12px;background:#7c3aed;'
+                f'color:#fff;font-size:0.82em;font-weight:600;white-space:nowrap;">⚙ {macro["name"]}</span>'
+                f'<span style="color:#9ca3af;font-size:0.75em;">{steps_preview}</span>'
+                f'</div>'
             )
 
     return (
-        f'<div style="padding:8px;line-height:2;">{badges_html}</div>'
+        f'<div style="padding:8px;line-height:2.2;">{badges_html}</div>'
         if badges_html
         else '<div style="padding:8px;color:#9ca3af;font-style:italic;">No tools available</div>'
     )
 
 
-def render_plan_html(plan: List[str], macros: List[Dict[str, Any]]) -> str:
+def render_plan_html(
+    plan:           List[str],
+    macros:         List[Dict[str, Any]],
+    macro_proposal: Optional[Dict[str, Any]] = None,
+) -> str:
     """
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     render_plan_html
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    Render the agent's proposed plan as an ordered list.
+    Render the agent's proposed plan as a numbered list.
 
-    Macro calls are annotated with a ⚙ icon and purple styling.
-    Atomic calls use a standard bullet.
+    Macro calls  → purple row with ⚙ icon.
+    Atomic calls → dark row with 🔧 icon.
+
+    If macro_proposal is provided (step where a new macro is introduced),
+    a dashed annotation card is appended showing the macro name and steps.
 
     Args:
-        plan   : Ordered list of tool names in the agent's plan.
-        macros : Accepted macros so the renderer can identify macro calls.
+        plan           : Ordered list of tool name strings.
+        macros         : Accepted macros list (name, steps) — used to identify macro calls.
+        macro_proposal : Dict with "name" and "steps" if the agent proposes a new macro
+                         this step, else None.
 
     Returns:
-        HTML string ready for gr.HTML component.
+        HTML string ready for gr.HTML.
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     """
-    macro_names = {m["name"] for m in macros}  # set for O(1) lookup
+    # Set of accepted macro names for O(1) lookup
+    macro_names = {m["name"] for m in macros}
 
+    # Build plan rows
     items_html = ""
     for i, tool in enumerate(plan, start=1):
         if tool in macro_names:
+            # Macro call — purple accent
             items_html += (
                 f'<li style="margin:6px 0;padding:6px 12px;border-radius:8px;'
                 f'background:#4c1d95;color:#e9d5ff;font-weight:600;">'
                 f'⚙ {i}. {tool} <span style="font-size:0.75em;opacity:0.7;">(macro)</span></li>'
             )
         else:
+            # Atomic call — neutral dark
             items_html += (
                 f'<li style="margin:6px 0;padding:6px 12px;border-radius:8px;'
                 f'background:#1f2937;color:#d1d5db;">'
                 f'🔧 {i}. {tool}</li>'
             )
 
-    return (
+    plan_block = (
         f'<ol style="list-style:none;padding:4px 0;margin:0;">{items_html}</ol>'
         if items_html
         else '<p style="color:#9ca3af;font-style:italic;">No plan submitted yet.</p>'
     )
+
+    # Macro introduction annotation (shown on the step where a new macro is proposed)
+    if macro_proposal:
+        steps_str  = " → ".join(macro_proposal.get("steps", []))
+        macro_name = macro_proposal.get("name", "?")
+        annotation = (
+            f'<div style="margin-top:10px;padding:10px 14px;'
+            f'border:2px dashed #7c3aed;border-radius:8px;background:#1e1b4b;">'
+            f'<div style="color:#c4b5fd;font-weight:700;font-size:0.88em;margin-bottom:4px;">'
+            f'📦 New macro introduced: '
+            f'<code style="color:#e9d5ff;background:#2e1065;padding:2px 6px;border-radius:4px;">'
+            f'{macro_name}</code>'
+            f'</div>'
+            f'<div style="color:#a5b4fc;font-size:0.80em;">{steps_str}</div>'
+            f'</div>'
+        )
+        return plan_block + annotation
+
+    return plan_block
 
 
 def render_macro_library_html(macros: List[Dict[str, Any]]) -> str:
@@ -563,27 +478,25 @@ def render_macro_library_html(macros: List[Dict[str, Any]]) -> str:
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     render_macro_library_html
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    Render the accumulated macro library as an HTML card list.
-
-    Shows macro name, its composite steps, and a purple accent border.
+    Render the accumulated macro library as a card list.
 
     Args:
-        macros : List of macro dicts with keys "name" and "steps".
+        macros : List of macro dicts with "name" and "steps" keys.
 
     Returns:
-        HTML string ready for gr.HTML component.
+        HTML string ready for gr.HTML.
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     """
     if not macros:
         return (
             '<div style="padding:12px;color:#9ca3af;font-style:italic;text-align:center;">'
-            'No macros created yet — run more episodes to see macro learning in action.'
+            'No macros created yet — run more steps to see macro learning in action.'
             '</div>'
         )
 
     cards_html = ""
     for macro in macros:
-        steps_display = " → ".join(macro["steps"])
+        steps_display = " → ".join(macro.get("steps", []))
         cards_html += (
             f'<div style="margin:6px 0;padding:10px 14px;border-left:3px solid #7c3aed;'
             f'background:#1e1b4b;border-radius:0 8px 8px 0;">'
@@ -591,7 +504,6 @@ def render_macro_library_html(macros: List[Dict[str, Any]]) -> str:
             f'<div style="color:#a5b4fc;font-size:0.82em;">{steps_display}</div>'
             f'</div>'
         )
-
     return f'<div style="padding:4px 0;">{cards_html}</div>'
 
 
@@ -600,34 +512,29 @@ def render_reward_html(reward: float) -> str:
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     render_reward_html
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    Render the step reward as a large, colour-coded number.
+    Render the step reward as a large colour-coded number.
 
     Colour scale:
-        reward >= 0.75  → green  (strong performance)
-        reward >= 0.50  → amber  (acceptable)
-        reward >= 0.0   → orange (partial credit)
-        reward < 0.0    → red    (penalty)
+        >= 0.75  → green  (Excellent)
+        >= 0.50  → amber  (Good)
+        >= 0.0   → orange (Partial)
+        < 0.0    → red    (Penalty)
 
     Args:
-        reward : Float reward value in [-0.2, 1.0].
+        reward : Float in [-0.2, 1.0].
 
     Returns:
-        HTML string ready for gr.HTML component.
+        HTML string ready for gr.HTML.
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     """
-    # Determine colour based on reward magnitude
     if reward >= 0.75:
-        colour = "#22c55e"   # green
-        label  = "Excellent"
+        colour, label = "#22c55e", "Excellent"
     elif reward >= 0.50:
-        colour = "#f59e0b"   # amber
-        label  = "Good"
+        colour, label = "#f59e0b", "Good"
     elif reward >= 0.0:
-        colour = "#f97316"   # orange
-        label  = "Partial"
+        colour, label = "#f97316", "Partial"
     else:
-        colour = "#ef4444"   # red
-        label  = "Penalty"
+        colour, label = "#ef4444", "Penalty"
 
     return (
         f'<div style="text-align:center;padding:12px;">'
@@ -639,13 +546,10 @@ def render_reward_html(reward: float) -> str:
 
 # ===========================================================================
 # SECTION 5: GLOBAL CUSTOM CSS
-# ---------------------------------------------------------------------------
-# Injected once at the gr.Blocks level so all tabs share the same theme
-# overrides.  Uses CSS custom properties where possible for easy theming.
 # ===========================================================================
 
 CUSTOM_CSS: str = """
-/* ---- Global font & background tweaks ---- */
+/* ---- Global font tweaks ---- */
 body, .gradio-container {
     font-family: 'Inter', 'Segoe UI', sans-serif !important;
 }
@@ -654,22 +558,6 @@ body, .gradio-container {
 .tab-nav button {
     font-weight: 600 !important;
     font-size: 0.95em !important;
-}
-
-/* ---- Score card highlight ---- */
-.score-card {
-    border-radius: 12px;
-    padding: 16px;
-    text-align: center;
-    background: #1f2937;
-}
-
-/* ---- Section header within a tab ---- */
-.section-header {
-    font-size: 1.05em;
-    font-weight: 700;
-    color: #a78bfa;
-    margin-bottom: 6px;
 }
 
 /* ---- Thinking spinner (shown during auto-play pause) ---- */

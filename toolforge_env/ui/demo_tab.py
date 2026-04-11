@@ -5,43 +5,56 @@
 # LICENSE file in the root directory of this source tree.
 
 """
-Tab 1 — Demo Mode
-=================
+ui/demo_tab.py — Tab 1: Demo Mode
+===================================
 
-A read-only simulation tab.  The user selects a model profile + difficulty,
-clicks "Run Simulation", and then steps through a pre-scripted agent episode
-using Previous / Next buttons or Auto Play.
+A read-only simulation tab.  The agent plans are scripted (from shared.py),
+but ALL environment interactions are real:
+    - "Run Simulation" calls env_reset() on the running ToolForge server.
+    - "Next Step" sends the scripted plan via env_step() and displays the
+      actual reward, task prompt, and macro state returned by the server.
 
-No real LLM or environment calls are made here.  All data comes from the
-SCRIPTED_PROFILES dict in shared.py.
+This means the env is the source of truth for:
+    - Task prompts
+    - Rewards
+    - Available tools (including approved macros)
+    - Episode done state
 
-Layout (top-to-bottom):
-    ┌─ Header (title + description) ─────────────────────────────────┐
-    │  Controls row: model selector | difficulty selector | Run btn  │
-    │  Disclaimer text                                                 │
-    ├─ Left column ─────────────┬─ Right column ────────────────────┐│
-    │  Current Task             │  Agent Plan                        ││
-    │  Available Tools          │  Reward display                    ││
-    │  Episode Progress         │  LLM Turns Used / Turns Saved      ││
-    │                           │  Macro Library                     ││
-    └───────────────────────────┴────────────────────────────────────┘│
-    │  Navigation: [◀ Previous] [Thinking…] [Next ▶] [▶ Auto Play]  │
-    └─────────────────────────────────────────────────────────────────┘
+The scripted profiles (SCRIPTED_PROFILES) only define WHAT PLAN each
+simulated model would choose at each step.
+
+Navigation model:
+    Step    = one task prompt within an episode (one env.step() call).
+    Episode = one task group (one env.reset() call).
+    "Next Step ▶"    — advance within episode (calls env.step()).
+    "🔄 Next Episode" — at last step; calls env.reset() with next episode_id.
+    "◀ Previous Step" — steps back through already-executed frames (no re-calling env).
+
+Import pattern (runs from toolforge_env/ dir):
+    from ui.demo_tab import build_demo_tab
 """
 
 import logging
-import time
 from typing import Any, Dict, List, Optional, Tuple
 
 import gradio as gr
 
-from toolforge_env.ui.shared import (
+from ui.shared import (
     ATOMIC_TOOLS,
     SCRIPTED_PROFILES,
     render_macro_library_html,
     render_plan_html,
     render_reward_html,
     render_tools_html,
+)
+from ui.env_client import (
+    DEFAULT_ENV_URL,
+    check_env_health,
+    env_reset,
+    env_step,
+    extract_macros,
+    parse_task_from_obs,
+    parse_tools_from_obs,
 )
 
 # ---------------------------------------------------------------------------
@@ -50,132 +63,191 @@ from toolforge_env.ui.shared import (
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Model / difficulty options
+# UI constants
 # ---------------------------------------------------------------------------
 
-# Available model display names — these are simulated profiles, not live calls
+# Available model display names — correspond to keys in SCRIPTED_PROFILES
 MODEL_OPTIONS: List[str] = [
     "GPT-4o (simulated)",
     "Llama 3 (simulated)",
     "Mistral (simulated)",
 ]
 
-# Difficulty options exposed to the user (only Easy is scripted for now)
+# Difficulty options (only Easy has full scripted profiles for now)
 DIFFICULTY_OPTIONS: List[str] = ["Easy"]
 
-# Disclaimer shown below the controls row
 DISCLAIMER_TEXT: str = (
-    "ℹ️  These are pre-scripted behavioral profiles, not live API calls. "
-    "Each model profile demonstrates a different macro-learning strategy "
-    "to illustrate how ToolForge incentivises pattern abstraction."
+    "ℹ️  Agent plans are pre-scripted behavioral profiles. "
+    "Rewards and task prompts come from the real ToolForge environment server."
+)
+
+# Note shown below Next button at episode boundary
+_EPISODE_END_NOTE: str = (
+    '<em style="color:#a78bfa;font-size:0.85em;">'
+    '📌 Last step of this episode — clicking again starts next episode and resets macros.'
+    '</em>'
+)
+_ALL_DONE_NOTE: str = (
+    '<em style="color:#f59e0b;font-size:0.85em;">'
+    '🎉 All scripted episodes complete — clicking restarts from the beginning.'
+    '</em>'
 )
 
 
 # ===========================================================================
-# STATE HELPERS
-# ---------------------------------------------------------------------------
-# These functions derive display values from a single episode frame dict.
-# They are called inside Gradio event handlers which must be pure functions
-# (no side effects, no global mutation).
+# INTERNAL HELPERS
 # ===========================================================================
 
-def _frame_to_outputs(
-    frame: Dict[str, Any],
-    episode_idx: int,
-    total_episodes: int,
+def _is_last_step(ep_idx: int, step_idx: int, episodes: List[Dict]) -> bool:
+    """True if step_idx is the final step in the current episode."""
+    if not episodes or ep_idx >= len(episodes):
+        return False
+    return step_idx >= len(episodes[ep_idx]["steps"]) - 1
+
+
+def _is_last_episode(ep_idx: int, episodes: List[Dict]) -> bool:
+    """True if ep_idx is the final episode in the list."""
+    return bool(episodes) and ep_idx >= len(episodes) - 1
+
+
+def _compute_btn_label_and_note(
+    ep_idx: int, step_idx: int, episodes: List[Dict]
+) -> Tuple[str, str]:
+    """Return (next_button_label, hint_html) based on current position."""
+    if not episodes:
+        return "Next Step ▶", ""
+    last_step = _is_last_step(ep_idx, step_idx, episodes)
+    last_ep   = _is_last_episode(ep_idx, episodes)
+    if last_step and last_ep:
+        return "🔄 Restart Simulation", _ALL_DONE_NOTE
+    elif last_step:
+        return "🔄 Next Episode ▶", _EPISODE_END_NOTE
+    return "Next Step ▶", ""
+
+
+def _build_outputs_from_step_result(
+    result:          Dict[str, Any],
+    scripted_step:   Dict[str, Any],
+    ep_idx:          int,
+    step_idx:        int,
+    episodes:        List[Dict[str, Any]],
+    history:         List[Dict[str, Any]],
 ) -> Tuple:
     """
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    _frame_to_outputs
+    _build_outputs_from_step_result
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    Convert one scripted episode frame into the tuple of values that
-    Gradio uses to update every output component.
-
-    The order of values in the returned tuple must exactly match the
-    order of the `outputs` list in every event handler that calls this
-    function.  See build_demo_tab() for the canonical output ordering.
+    Derive all 12 display values from a real env_step() or env_reset()
+    response, combined with the scripted step annotation.
 
     Args:
-        frame           : One episode frame dict from SCRIPTED_PROFILES.
-        episode_idx     : 0-based index of the current episode.
-        total_episodes  : Total number of episodes in the current profile.
+        result        : Raw dict from env_reset() or env_step().
+        scripted_step : The step script dict (plan, note, macro_proposed).
+        ep_idx        : Current episode index.
+        step_idx      : Current step index within the episode.
+        episodes      : Full episode list.
+        history       : List of already-executed frame dicts (for Prev).
 
     Returns:
-        Tuple of values — one per output component.
+        12-element tuple for the display components (indices 0–11).
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     """
-    # Task prompt text
-    task_text: str = frame["task_prompt"]
+    # ---- Parse env observation -----------------------------------------
+    task         = parse_task_from_obs(result)
+    all_tools    = parse_tools_from_obs(result)
+    macros       = extract_macros(all_tools)
+    atomic_names = [t["name"] for t in all_tools if not t.get("is_macro")]
 
-    # Available tools: all atomic tools + any macros created so far
-    macros_so_far: List[Dict[str, Any]] = frame.get("macros_so_far", [])
-    tools_html: str = render_tools_html(ATOMIC_TOOLS, macros_so_far)
+    # ---- Task prompt -------------------------------------------------------
+    task_text: str = task.get("prompt", "— no task prompt —")
 
-    # Episode progress string e.g. "Episode 3 of 6"
-    progress_text: str = f"Episode {episode_idx + 1} of {total_episodes}"
+    # ---- Available tools HTML (atomic + macro section) --------------------
+    tools_html: str = render_tools_html(atomic_names or ATOMIC_TOOLS, macros)
 
-    # Agent plan HTML (highlights macro calls)
-    plan_html: str = render_plan_html(frame["plan"], macros_so_far)
+    # ---- Progress string ---------------------------------------------------
+    current_ep    = episodes[ep_idx]
+    total_eps     = len(episodes)
+    total_steps   = len(current_ep["steps"])
+    ep_label      = current_ep.get("episode_label", current_ep["episode_id"])
+    progress_text = (
+        f"Step {step_idx + 1} of {total_steps}  |  "
+        f"Episode {ep_idx + 1} of {total_eps}: {ep_label}"
+    )
 
-    # Reward display HTML
-    reward_html: str = render_reward_html(frame["reward"])
+    # ---- Agent plan (with macro intro annotation if applicable) -----------
+    plan          = scripted_step.get("plan", [])
+    macro_prop    = scripted_step.get("macro_proposed")
+    plan_html     = render_plan_html(plan, macros, macro_proposal=macro_prop)
 
-    # LLM turns used = plan length (1 LLM call per step in our model)
-    turns_used: int = frame["turns_used"]
+    # ---- Reward (comes from env — None on reset) --------------------------
+    raw_reward    = result.get("reward") or 0.0
+    reward_html   = render_reward_html(float(raw_reward))
 
-    # Turns saved = max(0, baseline - actual_plan_length)
-    turns_saved: int = max(0, frame["turns_baseline"] - frame["turns_used"])
+    # ---- Turn counters -----------------------------------------------------
+    baseline      = task.get("baseline_call_count") or task.get("baseline_token_cost") or len(plan)
+    turns_used    = len(plan)
+    turns_saved   = max(0, baseline - turns_used)
 
-    # Macro library HTML
-    macro_lib_html: str = render_macro_library_html(macros_so_far)
+    # ---- Macro library panel -----------------------------------------------
+    macro_lib_html = render_macro_library_html(macros)
 
-    # Agent note / narrative
-    note_text: str = frame.get("note", "")
+    # ---- Agent note --------------------------------------------------------
+    note_text: str = scripted_step.get("note", "")
 
-    # Macro proposed annotation for the note area
-    proposed = frame.get("macro_proposed")
-    if proposed:
-        steps_str = " → ".join(proposed["steps"])
-        note_text += (
-            f'\n\n📦 Macro proposed: "{proposed["name"]}" = [{steps_str}]'
-        )
+    # ---- Next-button label + hint ------------------------------------------
+    btn_label, btn_note = _compute_btn_label_and_note(ep_idx, step_idx, episodes)
 
     return (
-        task_text,       # Current Task textbox
-        tools_html,      # Available Tools HTML
-        progress_text,   # Episode Progress textbox
-        plan_html,       # Agent Plan HTML
-        reward_html,     # Reward HTML
-        turns_used,      # LLM Turns Used number
-        turns_saved,     # Turns Saved vs Baseline number
-        macro_lib_html,  # Macro Library HTML
-        note_text,       # Agent Note textbox
+        task_text,       # 0
+        tools_html,      # 1
+        progress_text,   # 2
+        plan_html,       # 3
+        reward_html,     # 4
+        turns_used,      # 5
+        turns_saved,     # 6
+        macro_lib_html,  # 7
+        note_text,       # 8
+        btn_label,       # 9  — next button label
+        btn_note,        # 10 — hint HTML
+        "",              # 11 — clear status message
     )
 
 
 def _blank_outputs() -> Tuple:
-    """
-    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    _blank_outputs
-    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    Return the tuple of blank / placeholder values shown before the
-    user runs a simulation.
-
-    Returns:
-        Tuple of default values matching the same component order
-        as _frame_to_outputs().
-    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    """
+    """12-element blank tuple shown before any simulation is loaded."""
     return (
-        "Click 'Run Simulation' to load a scripted episode.",   # task
-        "<div style='color:#9ca3af;padding:8px;'>Run simulation to see tools.</div>",  # tools
-        "Episode — of —",                                        # progress
-        "<p style='color:#9ca3af;'>No plan yet.</p>",           # plan
-        render_reward_html(0.0),                                 # reward
-        0,                                                       # turns used
-        0,                                                       # turns saved
-        render_macro_library_html([]),                           # macro library
-        "Notes will appear here after simulation.",             # note
+        "Configure the env URL and click 'Run Simulation' to start.",
+        "<div style='color:#9ca3af;padding:8px;'>Connect to env to see tools.</div>",
+        "Step — of —  |  Episode — of —",
+        "<p style='color:#9ca3af;'>No plan yet.</p>",
+        render_reward_html(0.0),
+        0, 0,
+        render_macro_library_html([]),
+        "Notes will appear after simulation starts.",
+        "Next Step ▶",  # btn_label
+        "",             # btn_note
+        "",             # status
+    )
+
+
+def _error_outputs(msg: str) -> Tuple:
+    """12-element error tuple shown when env call fails."""
+    err_html = (
+        f'<div style="color:#f87171;padding:10px;border-radius:6px;'
+        f'background:#450a0a;margin:4px 0;">{msg}</div>'
+    )
+    return (
+        "— env error —",
+        "<div style='color:#9ca3af;padding:8px;'>Env not reachable.</div>",
+        "Step — of —  |  Episode — of —",
+        "<p style='color:#9ca3af;'>No plan.</p>",
+        render_reward_html(-0.2),
+        0, 0,
+        render_macro_library_html([]),
+        msg,
+        "Next Step ▶",
+        "",
+        err_html,
     )
 
 
@@ -185,9 +257,8 @@ def _blank_outputs() -> Tuple:
 
 def on_run_simulation(
     model_label: str,
-    difficulty: str,
-    ep_index_state: int,
-    episodes_state: List[Dict[str, Any]],
+    difficulty:  str,
+    env_url:     str,
 ) -> Tuple:
     """
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -195,135 +266,200 @@ def on_run_simulation(
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     Called when the user clicks "Run Simulation".
 
-    Loads the scripted profile for the selected model + difficulty,
-    resets the episode index to 0, and returns outputs for episode 0.
-
-    Args:
-        model_label      : Selected model display name.
-        difficulty       : Selected difficulty string ("Easy" etc.).
-        ep_index_state   : Current episode index (gr.State — ignored on run).
-        episodes_state   : Current episodes list (gr.State — replaced on run).
+    1. Loads the scripted episode list for the selected model + difficulty.
+    2. Calls env_reset() on the env server with the first episode_id.
+    3. Returns display outputs for step 0 of episode 0.
 
     Returns:
-        Flat tuple: (task, tools, progress, plan, reward, turns_used,
-                     turns_saved, macro_lib, note,
-                     new_ep_index, new_episodes_list)
+        12 display outputs + episodes_state + ep_idx + step_idx + history_state.
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     """
-    logger.info("Demo simulation started | model=%s difficulty=%s", model_label, difficulty)
+    logger.info("Demo run | model=%s difficulty=%s env=%s", model_label, difficulty, env_url)
 
-    # Normalise difficulty key to lowercase for dict lookup
     diff_key = difficulty.lower()
-
-    # Retrieve the scripted episodes for this profile
-    profile = SCRIPTED_PROFILES.get(model_label, {})
+    profile  = SCRIPTED_PROFILES.get(model_label, {})
     episodes: List[Dict[str, Any]] = profile.get(diff_key, [])
 
+    if not episodes or not episodes[0].get("steps"):
+        blank = _blank_outputs()
+        err_note = (
+            f'<div style="color:#f87171;padding:8px;">'
+            f'No scripted episodes for {model_label} / {difficulty}.</div>'
+        )
+        return blank[:-1] + (err_note,) + ([], 0, 0, [])
+
+    ep_idx   = 0
+    step_idx = 0
+    episode  = episodes[ep_idx]
+
+    # Call the real env
+    result, err = env_reset(env_url, episode["episode_id"])
+    if err or result is None:
+        return _error_outputs(f"env_reset failed: {err}") + ([], 0, 0, [])
+
+    scripted_step = episode["steps"][step_idx]
+    outputs = _build_outputs_from_step_result(
+        result, scripted_step, ep_idx, step_idx, episodes, []
+    )
+
+    # Seed history with this frame so Prev can navigate back
+    history = [{"result": result, "scripted": scripted_step, "ep_idx": ep_idx, "step_idx": step_idx}]
+
+    return outputs + (episodes, ep_idx, step_idx, history)
+
+
+def on_next_step(
+    ep_idx:   int,
+    step_idx: int,
+    episodes: List[Dict[str, Any]],
+    env_url:  str,
+    history:  List[Dict[str, Any]],
+) -> Tuple:
+    """
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    on_next_step
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    Advance one step forward.  Sends the scripted plan to the real env.
+
+    Within an episode: call env_step() with the next scripted plan.
+    At end of episode: call env_reset() for the next episode_id.
+    At end of all episodes: wrap back to start (restart).
+
+    Returns:
+        12 display outputs + new ep_idx + new step_idx + updated history.
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    """
     if not episodes:
-        # Fallback: no data for this combo — show an error note
-        outputs = _blank_outputs()
-        return outputs + (0, [])
+        return _blank_outputs() + (0, 0, [])
 
-    # Start at episode 0
-    new_index = 0
-    frame = episodes[new_index]
-    outputs = _frame_to_outputs(frame, new_index, len(episodes))
+    last_step = _is_last_step(ep_idx, step_idx, episodes)
+    last_ep   = _is_last_episode(ep_idx, episodes)
 
-    # Return outputs + updated state values (index and episodes list)
-    return outputs + (new_index, episodes)
+    # ---- Determine next position ------------------------------------------
+    if last_step and last_ep:
+        # Restart from beginning
+        new_ep_idx, new_step_idx = 0, 0
+    elif last_step:
+        # Advance to next episode
+        new_ep_idx, new_step_idx = ep_idx + 1, 0
+    else:
+        # Normal step advance within episode
+        new_ep_idx, new_step_idx = ep_idx, step_idx + 1
+
+    episode       = episodes[new_ep_idx]
+    scripted_step = episode["steps"][new_step_idx]
+
+    # ---- Call the env -------------------------------------------------------
+    if new_step_idx == 0:
+        # Episode boundary — call reset for the new episode
+        result, err = env_reset(env_url, episode["episode_id"])
+    else:
+        # Mid-episode — call step with the scripted plan
+        result, err = env_step(
+            env_url,
+            scripted_step["plan"],
+            scripted_step.get("macro_proposed"),
+        )
+
+    if err or result is None:
+        return _error_outputs(f"Env call failed: {err}") + (new_ep_idx, new_step_idx, history)
+
+    outputs = _build_outputs_from_step_result(
+        result, scripted_step, new_ep_idx, new_step_idx, episodes, history
+    )
+
+    # Append to history for Prev navigation
+    new_history = history + [
+        {"result": result, "scripted": scripted_step, "ep_idx": new_ep_idx, "step_idx": new_step_idx}
+    ]
+
+    return outputs + (new_ep_idx, new_step_idx, new_history)
 
 
-def on_next_episode(
-    ep_index_state: int,
-    episodes_state: List[Dict[str, Any]],
+def on_prev_step(
+    ep_idx:   int,
+    step_idx: int,
+    episodes: List[Dict[str, Any]],
+    history:  List[Dict[str, Any]],
 ) -> Tuple:
     """
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    on_next_episode
+    on_prev_step
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    Advance to the next episode frame.  Wraps around at the end.
+    Step backwards through already-executed frames using the history
+    buffer.  Does NOT re-call the env (env state is not reversible).
 
     Args:
-        ep_index_state  : Current 0-based episode index (gr.State).
-        episodes_state  : List of episode frame dicts (gr.State).
+        ep_idx   : Current episode index.
+        step_idx : Current step index.
+        episodes : Full episode list.
+        history  : List of previously executed frame dicts.
 
     Returns:
-        Flat tuple matching the same component + state ordering.
+        12 display outputs + new ep_idx + new step_idx + unchanged history.
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     """
-    if not episodes_state:
-        # No simulation loaded yet — return blanks unchanged
-        return _blank_outputs() + (0, [])
+    if not history or len(history) < 2:
+        # Already at the start — return unchanged
+        if not history:
+            return _blank_outputs() + (ep_idx, step_idx, history)
+        frame   = history[-1]
+        outputs = _build_outputs_from_step_result(
+            frame["result"], frame["scripted"], frame["ep_idx"], frame["step_idx"], episodes, history
+        )
+        return outputs + (frame["ep_idx"], frame["step_idx"], history)
 
-    # Advance index with wrap-around
-    new_index = (ep_index_state + 1) % len(episodes_state)
-    frame = episodes_state[new_index]
-    outputs = _frame_to_outputs(frame, new_index, len(episodes_state))
-    return outputs + (new_index, episodes_state)
-
-
-def on_prev_episode(
-    ep_index_state: int,
-    episodes_state: List[Dict[str, Any]],
-) -> Tuple:
-    """
-    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    on_prev_episode
-    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    Step back to the previous episode frame.  Wraps around at the start.
-
-    Args:
-        ep_index_state  : Current 0-based episode index (gr.State).
-        episodes_state  : List of episode frame dicts (gr.State).
-
-    Returns:
-        Flat tuple matching the same component + state ordering.
-    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    """
-    if not episodes_state:
-        return _blank_outputs() + (0, [])
-
-    # Step back with wrap-around
-    new_index = (ep_index_state - 1) % len(episodes_state)
-    frame = episodes_state[new_index]
-    outputs = _frame_to_outputs(frame, new_index, len(episodes_state))
-    return outputs + (new_index, episodes_state)
+    # Pop the latest frame and show the previous one
+    prev_frame = history[-2]
+    outputs    = _build_outputs_from_step_result(
+        prev_frame["result"], prev_frame["scripted"],
+        prev_frame["ep_idx"], prev_frame["step_idx"],
+        episodes, history[:-1],
+    )
+    return outputs + (prev_frame["ep_idx"], prev_frame["step_idx"], history[:-1])
 
 
 def on_auto_tick(
     auto_active: bool,
-    ep_index_state: int,
-    episodes_state: List[Dict[str, Any]],
+    ep_idx:      int,
+    step_idx:    int,
+    episodes:    List[Dict[str, Any]],
+    env_url:     str,
+    history:     List[Dict[str, Any]],
 ) -> Tuple:
     """
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     on_auto_tick
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    Called by gr.Timer on each tick when auto-play is active.
-
-    If auto-play is off or no episodes are loaded, returns current
-    state unchanged to avoid unnecessary re-renders.
-
-    Args:
-        auto_active     : Whether auto-play is currently enabled (gr.State).
-        ep_index_state  : Current episode index (gr.State).
-        episodes_state  : Episode frames list (gr.State).
-
-    Returns:
-        Same flat tuple as on_next_episode.
+    Called by gr.Timer.  Advances one step if auto-play is active.
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     """
-    if not auto_active or not episodes_state:
-        # Nothing to do — return blanks or current unchanged state
-        if not episodes_state:
-            return _blank_outputs() + (0, [])
-        # Return current frame without advancing
-        frame = episodes_state[ep_index_state]
-        outputs = _frame_to_outputs(frame, ep_index_state, len(episodes_state))
-        return outputs + (ep_index_state, episodes_state)
+    if not auto_active or not episodes:
+        if not episodes:
+            return _blank_outputs() + (0, 0, [])
+        # Return current frame unchanged
+        if history:
+            frame   = history[-1]
+            outputs = _build_outputs_from_step_result(
+                frame["result"], frame["scripted"],
+                frame["ep_idx"], frame["step_idx"], episodes, history
+            )
+            return outputs + (frame["ep_idx"], frame["step_idx"], history)
+        return _blank_outputs() + (ep_idx, step_idx, history)
 
-    # Advance to next episode
-    return on_next_episode(ep_index_state, episodes_state)
+    return on_next_step(ep_idx, step_idx, episodes, env_url, history)
+
+
+def on_test_env(env_url: str) -> str:
+    """Check env health and return a status HTML string."""
+    _, msg = check_env_health(env_url)
+    if msg.startswith("✅"):
+        return (
+            f'<div style="color:#4ade80;padding:8px;border-radius:6px;background:#052e16;">{msg}</div>'
+        )
+    return (
+        f'<div style="color:#f87171;padding:8px;border-radius:6px;background:#450a0a;">{msg}</div>'
+    )
 
 
 # ===========================================================================
@@ -335,14 +471,10 @@ def build_demo_tab() -> gr.Tab:
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     build_demo_tab
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    Construct and return the full "Demo Mode" gr.Tab component.
-
-    All internal component wiring (event handlers, state) is done here.
-    The caller (gradio_app.py) just inserts the returned Tab into the
-    gr.Blocks layout.
+    Build and return the "Demo Mode" gr.Tab with all event wiring.
 
     Returns:
-        A configured gr.Tab component ready to be placed in gr.Blocks.
+        Configured gr.Tab instance.
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     """
     with gr.Tab("🎬 Demo Mode") as tab:
@@ -357,46 +489,51 @@ def build_demo_tab() -> gr.Tab:
             Watch a pre-scripted agent solve DevOps tasks and progressively learn to
             **compress repeated tool sequences into reusable macro tools**.
 
-            Each episode shows one task from the environment.  As the agent encounters
-            the same tool-call patterns, it proposes macros that collapse those patterns
-            into a single reusable action — saving tokens and earning efficiency bonuses.
+            Agent plans are scripted, but **rewards and task state come from the real
+            ToolForge environment server** — connect it below before running.
             """
         )
 
         # -------------------------------------------------------------------
-        # CONTROLS ROW
+        # ENV CONNECTION ROW
         # -------------------------------------------------------------------
         with gr.Row():
-            # Model selector dropdown
+            env_url_field = gr.Textbox(
+                value=DEFAULT_ENV_URL,
+                label="Environment Server URL",
+                placeholder="http://localhost:8000",
+                scale=4,
+            )
+            test_env_btn = gr.Button("🔗 Test Connection", scale=1)
+
+        env_status_html = gr.HTML(value="")
+
+        gr.HTML("<hr style='border-color:#374151;margin:8px 0;'>")
+
+        # -------------------------------------------------------------------
+        # SIMULATION CONTROLS
+        # -------------------------------------------------------------------
+        with gr.Row():
             model_selector = gr.Dropdown(
-                choices=MODEL_OPTIONS,          # available simulated profiles
-                value=MODEL_OPTIONS[0],         # default: GPT-4o
+                choices=MODEL_OPTIONS,
+                value=MODEL_OPTIONS[0],
                 label="Model Profile",
                 scale=3,
             )
-
-            # Difficulty selector (only Easy is scripted for now)
             difficulty_selector = gr.Dropdown(
-                choices=DIFFICULTY_OPTIONS,     # ["Easy"]
+                choices=DIFFICULTY_OPTIONS,
                 value=DIFFICULTY_OPTIONS[0],
                 label="Difficulty",
                 scale=1,
             )
+            run_btn = gr.Button("▶ Run Simulation", variant="primary", scale=2)
 
-            # Trigger to load / reload the simulation
-            run_btn = gr.Button(
-                "▶ Run Simulation",
-                variant="primary",
-                scale=2,
-            )
-
-        # Disclaimer below controls
         gr.Markdown(f"*{DISCLAIMER_TEXT}*")
 
         gr.HTML("<hr style='border-color:#374151;margin:8px 0;'>")
 
         # -------------------------------------------------------------------
-        # MAIN CONTENT — two-column layout
+        # MAIN TWO-COLUMN LAYOUT
         # -------------------------------------------------------------------
         with gr.Row():
 
@@ -405,24 +542,21 @@ def build_demo_tab() -> gr.Tab:
             # ===============================================================
             with gr.Column(scale=1):
 
-                # Current task prompt
                 current_task_box = gr.Textbox(
                     label="📋 Current Task",
-                    value="Click 'Run Simulation' to load a scripted episode.",
+                    value="Configure env URL and click Run Simulation.",
                     lines=3,
                     interactive=False,
                 )
 
-                # Available tools (HTML for colour-coded macros)
                 gr.Markdown("**🔧 Available Tools** *(purple = macro)*")
                 available_tools_html = gr.HTML(
-                    value="<div style='color:#9ca3af;padding:8px;'>Run simulation to see tools.</div>"
+                    value="<div style='color:#9ca3af;padding:8px;'>Connect env to see tools.</div>"
                 )
 
-                # Episode progress counter
                 episode_progress_box = gr.Textbox(
-                    label="📊 Episode Progress",
-                    value="Episode — of —",
+                    label="📊 Progress",
+                    value="Step — of —  |  Episode — of —",
                     interactive=False,
                 )
 
@@ -431,42 +565,37 @@ def build_demo_tab() -> gr.Tab:
             # ===============================================================
             with gr.Column(scale=1):
 
-                # Agent plan (HTML with macro highlighting)
                 gr.Markdown("**🤖 Agent Plan**")
                 agent_plan_html = gr.HTML(
                     value="<p style='color:#9ca3af;'>No plan yet.</p>"
                 )
 
-                # Reward display — large styled number
-                gr.Markdown("**🏆 Step Reward**")
+                gr.Markdown("**🏆 Step Reward** *(real env score)*")
                 reward_html = gr.HTML(value=render_reward_html(0.0))
 
-                # Turn counters row
                 with gr.Row():
                     turns_used_num = gr.Number(
                         label="LLM Turns Used",
-                        value=0,
-                        interactive=False,
-                        precision=0,
+                        value=0, interactive=False, precision=0,
                     )
                     turns_saved_num = gr.Number(
                         label="Turns Saved vs Baseline",
-                        value=0,
-                        interactive=False,
-                        precision=0,
+                        value=0, interactive=False, precision=0,
                     )
 
-                # Macro library panel
                 gr.Markdown("**⚙ Macro Library**")
                 macro_library_html = gr.HTML(value=render_macro_library_html([]))
 
-        # Agent note / narrative (full width, below columns)
+        # Agent note — full width
         agent_note_box = gr.Textbox(
             label="📝 Agent Note",
-            value="Notes will appear here after simulation.",
+            value="Notes will appear after simulation starts.",
             lines=3,
             interactive=False,
         )
+
+        # Status bar for env errors
+        step_status_html = gr.HTML(value="")
 
         gr.HTML("<hr style='border-color:#374151;margin:8px 0;'>")
 
@@ -474,120 +603,107 @@ def build_demo_tab() -> gr.Tab:
         # NAVIGATION ROW
         # -------------------------------------------------------------------
         with gr.Row():
-            prev_btn = gr.Button("◀ Previous Episode", scale=1)
+            prev_btn      = gr.Button("◀ Previous Step", scale=1)
+            thinking_html = gr.HTML(value="", visible=True)
+            next_btn      = gr.Button("Next Step ▶", variant="secondary", scale=1)
+            auto_play_btn = gr.Button("▶ Auto Play", variant="secondary", scale=1)
 
-            # Thinking indicator — shown briefly when auto-play is active
-            # TODO: Wire this to show during the auto-advance delay
-            thinking_html = gr.HTML(
-                value="",
-                visible=True,
-                elem_id="demo_thinking_indicator",
-            )
-
-            next_btn = gr.Button("Next Episode ▶", variant="secondary", scale=1)
-
-            auto_play_btn = gr.Button(
-                "▶ Auto Play",
-                variant="secondary",
-                scale=1,
-            )
+        btn_note_html = gr.HTML(value="")
 
         # -------------------------------------------------------------------
         # HIDDEN STATE
         # -------------------------------------------------------------------
 
-        # Holds the 0-based index of the currently displayed episode
-        ep_index_state = gr.State(value=0)
+        # Index of current episode in episodes_state
+        ep_index_state   = gr.State(value=0)
 
-        # Holds the full list of episode frame dicts for the active profile
-        episodes_state = gr.State(value=[])
+        # Index of current step within the episode
+        step_index_state = gr.State(value=0)
 
-        # Tracks whether auto-play is currently running
+        # Full episode+step list for the active profile
+        episodes_state   = gr.State(value=[])
+
+        # History of executed frames for Prev navigation
+        # Each entry: {"result": dict, "scripted": dict, "ep_idx": int, "step_idx": int}
+        history_state    = gr.State(value=[])
+
+        # Whether auto-play is active
         auto_active_state = gr.State(value=False)
 
         # -------------------------------------------------------------------
         # AUTO-PLAY TIMER
-        # Ticks every 3 seconds when auto-play is active.
-        # gr.Timer was introduced in Gradio 4.4+.
-        # TODO: Gracefully degrade for older Gradio versions.
         # -------------------------------------------------------------------
         try:
             auto_timer = gr.Timer(value=3.0, active=False)
             _has_timer = True
         except AttributeError:
-            logger.warning(
-                "gr.Timer not available in this Gradio version. "
-                "Auto-play will not function. Please upgrade to Gradio 4.4+."
-            )
+            logger.warning("gr.Timer unavailable — auto-play disabled.")
             _has_timer = False
 
         # -------------------------------------------------------------------
-        # CANONICAL OUTPUT LIST
-        # The order here must match _frame_to_outputs() and _blank_outputs().
+        # CANONICAL OUTPUT LIST (12 display + state components)
         # -------------------------------------------------------------------
-        _all_display_outputs = [
-            current_task_box,
-            available_tools_html,
-            episode_progress_box,
-            agent_plan_html,
-            reward_html,
-            turns_used_num,
-            turns_saved_num,
-            macro_library_html,
-            agent_note_box,
+        _display = [
+            current_task_box,      # 0
+            available_tools_html,  # 1
+            episode_progress_box,  # 2
+            agent_plan_html,       # 3
+            reward_html,           # 4
+            turns_used_num,        # 5
+            turns_saved_num,       # 6
+            macro_library_html,    # 7
+            agent_note_box,        # 8
+            next_btn,              # 9  — label update
+            btn_note_html,         # 10
+            step_status_html,      # 11
         ]
-        # State outputs always appended after display outputs
-        _state_outputs = [ep_index_state, episodes_state]
+        _step_state = [ep_index_state, step_index_state, history_state]
 
         # -------------------------------------------------------------------
-        # EVENT: Run Simulation button
+        # EVENTS
         # -------------------------------------------------------------------
+
+        # Test env connection
+        test_env_btn.click(
+            fn=on_test_env,
+            inputs=[env_url_field],
+            outputs=[env_status_html],
+        )
+
+        # Run Simulation → reset env, show step 0
         run_btn.click(
             fn=on_run_simulation,
-            inputs=[model_selector, difficulty_selector, ep_index_state, episodes_state],
-            outputs=_all_display_outputs + _state_outputs,
+            inputs=[model_selector, difficulty_selector, env_url_field],
+            outputs=_display + [episodes_state] + _step_state,
         )
 
-        # -------------------------------------------------------------------
-        # EVENT: Next Episode button
-        # -------------------------------------------------------------------
+        # Next Step (also handles episode boundary)
         next_btn.click(
-            fn=on_next_episode,
-            inputs=[ep_index_state, episodes_state],
-            outputs=_all_display_outputs + _state_outputs,
+            fn=on_next_step,
+            inputs=[ep_index_state, step_index_state, episodes_state, env_url_field, history_state],
+            outputs=_display + _step_state,
         )
 
-        # -------------------------------------------------------------------
-        # EVENT: Previous Episode button
-        # -------------------------------------------------------------------
+        # Previous Step (navigates history buffer, no env call)
         prev_btn.click(
-            fn=on_prev_episode,
-            inputs=[ep_index_state, episodes_state],
-            outputs=_all_display_outputs + _state_outputs,
+            fn=on_prev_step,
+            inputs=[ep_index_state, step_index_state, episodes_state, history_state],
+            outputs=_display + _step_state,
         )
 
-        # -------------------------------------------------------------------
-        # EVENT: Auto Play button — toggles auto_active_state and timer
-        # -------------------------------------------------------------------
+        # Auto Play toggle
         def toggle_auto_play(current_active: bool):
-            """
-            Toggle the auto-play state.  Returns the new state value and
-            updates the button label to reflect the current mode.
-            """
+            """Toggle auto-play and update button + spinner."""
             new_active = not current_active
             new_label  = "⏹ Stop Auto Play" if new_active else "▶ Auto Play"
-
-            # Show/hide the thinking spinner based on auto state
-            thinking_content = (
-                '<span class="thinking-spinner"></span><em style="color:#a78bfa;">Auto advancing…</em>'
+            thinking   = (
+                '<span class="thinking-spinner"></span>'
+                '<em style="color:#a78bfa;">Auto advancing…</em>'
                 if new_active else ""
             )
-
             if _has_timer:
-                # Activate/deactivate the timer component
-                return new_active, gr.update(value=new_label), gr.update(value=thinking_content), gr.Timer(active=new_active)
-            else:
-                return new_active, gr.update(value=new_label), gr.update(value=thinking_content)
+                return new_active, gr.update(value=new_label), gr.update(value=thinking), gr.Timer(active=new_active)
+            return new_active, gr.update(value=new_label), gr.update(value=thinking)
 
         if _has_timer:
             auto_play_btn.click(
@@ -595,15 +711,12 @@ def build_demo_tab() -> gr.Tab:
                 inputs=[auto_active_state],
                 outputs=[auto_active_state, auto_play_btn, thinking_html, auto_timer],
             )
-
-            # Timer tick — advance one episode
             auto_timer.tick(
                 fn=on_auto_tick,
-                inputs=[auto_active_state, ep_index_state, episodes_state],
-                outputs=_all_display_outputs + _state_outputs,
+                inputs=[auto_active_state, ep_index_state, step_index_state, episodes_state, env_url_field, history_state],
+                outputs=_display + _step_state,
             )
         else:
-            # Fallback: toggle button still works but no timer-driven advance
             auto_play_btn.click(
                 fn=toggle_auto_play,
                 inputs=[auto_active_state],
