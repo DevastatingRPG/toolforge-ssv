@@ -36,12 +36,14 @@ Even when tasks are structurally identical, agents behave statelessly—treating
 ---
 
 ## 🧠 Core Idea
+
+```mermaid
 flowchart LR
     A[Repeated Tasks] --> B[Pattern Detection]
     B --> C[Tool Abstraction]
     C --> D[Tool Registry]
     D --> E[Direct Invocation]
-
+```
 ToolForge introduces a learning loop where agents evolve their own toolset.
 
 ---
