@@ -18,6 +18,45 @@ tags:
 
 A deterministic agent optimization environment designed to evaluate and enhance how AI agents learn reusable tool abstractions from repeated user workflows—reducing redundant reasoning, minimizing token usage, and improving execution efficiency over time.
 
+## Quick Start
+
+```python
+import asyncio
+from client import ToolforgeEnv
+from models import ToolForgeAction, ToolCall, Tool
+
+async def main():
+    try:
+        # Connect to the live HuggingFace Space
+        with ToolForgeEnv.from_env("ShubhamSarkar04/toolforge-env") as env:
+            # Reset the environment with a specific task tier
+            result = await env.reset(task_id="easy")
+            obs = result.observation
+            
+            print("== USER TASK ==")
+            print(obs.current_task.prompt)
+            print("== AVAILABLE TOOLS ==")
+            print(obs.available_tools)
+
+            # Step — submit the agent's plan of action
+            action = ToolForgeAction(
+                action_type="propose_plan",
+                plan=[
+                    ToolCall(tool_name="deploy"),
+                    ToolCall(tool_name="healthcheck"),
+                    ToolCall(tool_name="notify")
+                ]
+            )
+            result = await env.step(action)
+            
+            print(f"\nScore: {result.reward:.2f}")
+            print(f"Feedback: {result.observation.feedback}")
+
+    finally:
+        await env.close()
+```
+
+
 ## 💡 Why This Problem?
 Modern tool-enabled agents (e.g., using function calling or tool APIs) suffer from a key inefficiency:
 
@@ -47,6 +86,48 @@ flowchart LR
 ToolForge introduces a learning loop where agents evolve their own toolset.
 
 ---
+## ⚙️ Current Environment Architecture
+
+```mermaid
+flowchart TD
+    A[Input Provider] --> B[LLM Agent]
+    B --> C[Tool Plan Proposal]
+    B --> D["Macro Proposal (Optional)"]
+    C --> E[Evaluation Engine]
+    D --> E
+    E --> F{Accepted?}
+    F -- Yes --> G[Persist Macro + Reward]
+    F -- No --> H[Reject / Penalize]
+```
+---
+
+## 🔍 Evaluation Pipeline
+```mermaid
+flowchart TD
+    A[Plan + Macro Proposal] --> B[Sanity Validation]
+    B -->|Fail| X["Immediate Penalty (-0.2)"]
+
+    B -->|Pass| C[Slot Judgment]
+    C -->|Harmful Calls| Y["Immediate Min Reward (-0.2)"]
+    C -->|Judge Failure| Z[Zero Reward]
+
+    C --> D[Reward Feature Extraction]
+    D --> E[Rubric Scoring Engine]
+    E --> F["Final Reward ∈ [-0.2, 1.0]"]
+```
+- Strict short-circuiting ensures invalid or unsafe plans are penalized early
+- Final reward is bounded between -0.2 and 1.0
+---
+
+<!-- ## 🧪 Evaluation Criteria (Detailed)
+1. **Sanity Validation (Hard Gate)**
+
+```
+flowchart LR
+    A[Plan] -> B{Valid Tool Calls?}
+    B -- No -> C[Penalty: -0.2]
+    B -- Yes D[Proceed] ->
+``` -->
 
 ## What Makes This Different
 
@@ -56,49 +137,6 @@ ToolForge goes beyond simple tool execution benchmarks. It evaluates an agent's 
 - **Dual-Objective Scoring:** Plans are evaluated on both **semantic accuracy** (did it solve the task?) and **token efficiency** (did it use macros to save tokens?).
 - **Progressive Difficulty:** Tasks range from highly repetitive deployment sprints (easy) to complex, multi-phase infrastructure migrations (hard).
 
-## Quick Start
-
-```python
-from toolforge_env.toolforge_env_environment import ToolforgeEnvironment
-from toolforge_env.models import ToolForgeAction, ToolCall, Tool
-
-env = ToolforgeEnvironment()
-result = env.reset(mode="eval", difficulty="easy")
-
-print(f"Task: {result.current_task.prompt}")
-
-action = ToolForgeAction(
-    action_type="propose_plan",
-    plan=[
-        ToolCall(tool_name="deploy"),
-        ToolCall(tool_name="healthcheck"),
-        ToolCall(tool_name="notify")
-    ]
-)
-result = env.step(action)
-print(f"Reward: {result.reward}")
-
-macro_action = ToolForgeAction(
-    action_type="propose_plan_with_macro",
-    plan=[
-        ToolCall(tool_name="deploy"),
-        ToolCall(tool_name="healthcheck"),
-        ToolCall(tool_name="notify")
-    ],
-    macro_proposal=Tool(
-        name="deploy_verify_notify",
-        description="Standard deployment pipeline",
-        is_macro=True,
-        token_cost=1, 
-        steps=[
-            ToolCall(tool_name="deploy"),
-            ToolCall(tool_name="healthcheck"),
-            ToolCall(tool_name="notify")
-        ]
-    )
-)
-result = env.step(macro_action)
-```
 
 ## Server Setup & Deployment
 
