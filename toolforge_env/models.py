@@ -198,12 +198,6 @@ class ToolForgeState(State):
     current_task: Task
     """The task currently being worked on"""
     
-    task_queue: List[Task]
-    """Queue of upcoming tasks"""
-    
-    completed_tasks: List[Task]
-    """List of tasks successfully completed"""
-    
     available_tools: List[Tool]
     """All currently available tools"""
     

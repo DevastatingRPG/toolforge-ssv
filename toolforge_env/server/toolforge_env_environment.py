@@ -29,22 +29,16 @@ except ImportError:
 
 try:
     from ..models import (
-        Tool,
-        ToolCall,
         ToolForgeAction,
         ToolForgeObservation,
         ToolForgeState,
-        Task,
         EpisodeGradingState,
     )
 except ImportError:
     from models import (
-        Tool,
-        ToolCall,
         ToolForgeAction,
         ToolForgeObservation,
         ToolForgeState,
-        Task,
         EpisodeGradingState,
     )
 
@@ -52,10 +46,20 @@ try:
     from server.tools import build_atomic_tools
     from server.evaluation.pipeline import run_evaluation_pipeline
     from server.evaluation.plan_evaluator import update_sequence_counts
+    from .utils.state_utils import create_default_state, create_default_observation
+    from .utils.tool_utils import available_tools_to_prompt_specs, analyze_plan
+    from .utils.task_utils import get_next_task_from_generator, advance_to_next_task
+    from .utils.macro_utils import process_macro_proposal
+    from .utils.grading_utils import update_grading_state
 except ImportError:
     from .tools import build_atomic_tools
     from .evaluation.pipeline import run_evaluation_pipeline
     from .evaluation.plan_evaluator import update_sequence_counts
+    from server.utils.state_utils import create_default_state, create_default_observation
+    from server.utils.tool_utils import available_tools_to_prompt_specs, analyze_plan
+    from server.utils.task_utils import get_next_task_from_generator, advance_to_next_task
+    from server.utils.macro_utils import process_macro_proposal
+    from server.utils.grading_utils import update_grading_state
 
 
 logger = logging.getLogger(__name__)
@@ -90,78 +94,17 @@ class ToolforgeEnvironment(Environment):
     def __init__(self):
         """Initialize the toolforge_env environment."""
         super().__init__(transform=None, rubric=None)
-        self._state = self._create_default_state()
+        self._state = create_default_state()
         self._reset_count = 0
 
         self._task_selector = TaskSelector()
         self._input_provider_factory = create_input_provider
         self._input_provider: Optional[InputProvider] = None
-        self._last_approval: Optional[bool] = None
 
         # persistent config
         self.mode = None
         self.difficulty: str = "easy"
         self.initialized = False
-
-    def _create_default_state(self) -> ToolForgeState:
-        """
-        Create a default ToolForgeState with basic parameters.
-
-        Returns:
-            ToolForgeState with default values
-        """
-        default_task = Task(
-            id="default-task",
-            prompt="Default task",
-            difficulty="easy",
-            required_slots=[],
-            baseline_token_cost=0,
-        )
-
-        return ToolForgeState(
-            episode_id=str(uuid4()),
-            step_count=0,
-            current_task=default_task,
-            task_queue=[],
-            completed_tasks=[],
-            available_tools=[],
-            accepted_macros=[],
-            rejected_macro_count=0,
-            call_history=[],
-            tokens_used=0,
-            done=False,
-        )
-
-    def _create_default_observation(self) -> ToolForgeObservation:
-        """
-        Create a default ToolForgeObservation with basic parameters.
-
-        Returns:
-            ToolForgeObservation with default values
-        """
-        return ToolForgeObservation(
-            current_task=self._state.current_task,
-            available_tools=self._available_tools_to_prompt_specs(self._state.available_tools),
-            grading = self._state.grading
-
-        )
-
-    def _tool_to_prompt_spec(self, tool: Tool) -> Dict[str, Any]:
-        """Convert a Tool model into a plain prompt-friendly dictionary."""
-
-        return {
-            "name": tool.name,
-            "description": tool.description,
-            "is_macro": tool.is_macro,
-            "steps": tool.steps or [],
-        }
-
-    def _available_tools_to_prompt_specs(self, tools: List[Tool]) -> List[Dict[str, Any]]:
-        """Convert available tools to plain dictionaries ready for prompt injection.
-        Macros are listed first, followed by atomic tools.
-        """
-        sorted_tools = sorted(tools, key=lambda t: not t.is_macro)
-        return [self._tool_to_prompt_spec(tool) for tool in sorted_tools]
 
     def reset(        
             self, 
@@ -178,7 +121,7 @@ class ToolforgeEnvironment(Environment):
         """
         ep_id = episode_id if episode_id is not None else str(uuid4())
 
-        self._state = self._create_default_state()
+        self._state = create_default_state()
         self._state.episode_id = ep_id
         self._reset_count += 1
         resolved_task_id = task_id or kwargs.get("task_id", "easy")
@@ -187,30 +130,11 @@ class ToolforgeEnvironment(Environment):
         task_list = self._task_selector.next_task_list(resolved_task_id)
 
         self._input_provider = self._input_provider_factory(task_list)
-        first_task = self._get_next_task_from_generator()
+        first_task = get_next_task_from_generator(self._input_provider)
         self._state.current_task = first_task
-        self._sync_task_queue_from_generator()
-        self._state.completed_tasks = []
-        self._state.available_tools = build_atomic_tools()
-        self._state.accepted_macros = []
-        self._state.rejected_macro_count = 0
-        self._state.call_history = []
-        self._state.tokens_used = 0
-        self._state.done = False
         # Reset episode-level macro tracking state
-        self._state.sequence_counts = {}
-        self._state.macro_usage_counts = {}
-        self._state.macro_definitions = {}
-        self._last_approval = None
 
-        # Fresh episode-level grading accumulator
-        self._state.grading = EpisodeGradingState()
-
-
-        obs = self._create_default_observation()
-        obs.done = False
-        obs.reward = 0.0
-
+        obs = create_default_observation(self._state, available_tools_to_prompt_specs)
         return obs
 
     def step(self, action: ToolForgeAction) -> ToolForgeObservation:  # type: ignore[override]
@@ -224,7 +148,7 @@ class ToolforgeEnvironment(Environment):
             ToolForgeObservation with the echoed message and its length
         """
         if self._is_done():
-            obs_terminal = self._create_default_observation()
+            obs_terminal = create_default_observation(self._state, available_tools_to_prompt_specs)
             obs_terminal.done = True
             obs_terminal.reward = 0.0
             obs_terminal.metadata = {
@@ -239,7 +163,6 @@ class ToolforgeEnvironment(Environment):
                 type(action).__name__,
             )
             self._state.step_count += 1
-            self._last_approval = False
 
             # Track malformed actions in grading state
             self._state.grading.episode_steps += 1
@@ -250,10 +173,10 @@ class ToolforgeEnvironment(Environment):
                 self._state.done = True
                 progression = "episode_terminated_max_steps"
             else:
-                advanced = self._advance_to_next_task()
+                advanced = advance_to_next_task(self._state, self._input_provider)
                 progression = "advanced_to_next_task" if advanced else "episode_completed"
 
-            obs_malformed = self._create_default_observation()
+            obs_malformed = create_default_observation(self._state, available_tools_to_prompt_specs)
             obs_malformed.done = self._is_done()
             obs_malformed.reward = 0.0
             obs_malformed.metadata = {
@@ -268,10 +191,9 @@ class ToolforgeEnvironment(Environment):
 
         self._state.step_count += 1
 
-        plan_accounting = self._analyze_plan(action.plan)
+        plan_accounting = analyze_plan(action.plan, self._state.available_tools)
         step_call_count = plan_accounting["step_call_count"]
-        unknown_tool_calls = plan_accounting["unknown_tool_calls"]
-
+        
         self._state.call_history.extend(action.plan)
         self._state.tokens_used += step_call_count
 
@@ -288,7 +210,6 @@ class ToolforgeEnvironment(Environment):
             macro_definitions=self._state.macro_definitions,
             macro_proposal=action.macro_proposal,
         )
-        self._last_approval = bool(pipeline_result.passed_validation)
 
         # Update sequence counts AFTER pipeline evaluation so recognition uses prior counts only
         update_sequence_counts(action.plan, self._state.sequence_counts)
@@ -306,11 +227,12 @@ class ToolforgeEnvironment(Environment):
             self._state.done = True
             progression = "episode_terminated_max_steps"
         else:
-            advanced = self._advance_to_next_task()
+            advanced = advance_to_next_task(self._state, self._input_provider)
             progression = "advanced_to_next_task" if advanced else "episode_completed"
 
-        macro_result = self._process_macro_proposal(
+        macro_result = process_macro_proposal(
             action=action,
+            state=self._state,
             can_accept=bool(pipeline_result.passed_validation),
             reject_reason="plan_not_accepted",
         )
@@ -318,7 +240,7 @@ class ToolforgeEnvironment(Environment):
         # Note: the macro is added to self._state.available_tools inside _process_macro_proposal()
 
         # Accumulate grading state from this step
-        self._update_grading_state(pipeline_result, macro_result, action)
+        update_grading_state(self._state, pipeline_result, macro_result, action)
 
         # Fetch the scalar reward from the evaluation pipeline
         reward = float(pipeline_result.reward)
@@ -326,280 +248,11 @@ class ToolforgeEnvironment(Environment):
         print(f"Done: {self._state.done}{self._is_done()} | Step {self._state.step_count} | Task '{self._state.current_task.id}' | Reward: {reward:.3f} | Progression: {progression} | Macro Proposal: {macro_result}")
         return ToolForgeObservation(
             current_task=self._state.current_task,
-            available_tools=self._available_tools_to_prompt_specs(self._state.available_tools),
+            available_tools=available_tools_to_prompt_specs(self._state.available_tools),
             done=self._is_done(),
             reward=reward,
             grading = self._state.grading
         )
-
-    def _advance_to_next_task(self) -> bool:
-        """Advance from current task to the next queued task."""
-
-        completed_task_id = self._state.current_task.id
-        self._state.completed_tasks.append(self._state.current_task)
-
-        if self._input_provider is None or self._input_provider.is_done():
-            self._state.done = True
-            self._state.task_queue = []
-            logger.info(
-                "Episode complete. Final task '%s' finished; no tasks remain.",
-                completed_task_id,
-            )
-            return False
-
-        next_task = self._get_next_task_from_generator()
-        self._state.current_task = next_task
-        print("Prompt change")
-        self._sync_task_queue_from_generator()
-        logger.info(
-            "Task advanced from '%s' to '%s'. Remaining tasks=%d",
-            completed_task_id,
-            next_task.id,
-            len(self._state.task_queue),
-        )
-        logger.debug("Next task prompt: %s", next_task.prompt)
-        return True
-
-    def _update_grading_state(
-        self,
-        pipeline_result,
-        macro_result: Dict[str, Any],
-        action: ToolForgeAction,
-    ) -> None:
-        """Accumulate episode-level grading counters from a single step."""
-        g = self._state.grading
-        g.episode_steps += 1
-
-        # Validation failures
-        if not pipeline_result.passed_validation:
-            g.validation_failures += 1
-
-        # Harmful calls
-        if pipeline_result.step_harmful:
-            g.harmful_plan_count += 1
-
-        # Correct plans (full slot fill + valid)
-        if pipeline_result.step_task_complete and pipeline_result.passed_validation:
-            g.correct_plan_count += 1
-
-        # Efficiency tracking (only when slot_ratio == 1.0)
-        sr = pipeline_result.step_slot_ratio
-        if sr is not None and sr >= 1.0:
-            g.fully_correct_efficiency_opportunities += 1
-            g.sum_efficiency_score += (pipeline_result.step_efficiency_score or 0.0)
-
-        # Macro creation tracking
-        if macro_result["attempted"]:
-            g.macro_creation_attempts += 1
-            if macro_result["decision"] == "approved":
-                g.macro_creation_approved += 1
-                if pipeline_result.passed_validation:
-                    g.macro_creation_correct += 1
-                g.macro_creation_bonus_total += (pipeline_result.step_macro_creation_bonus or 0.0)
-            elif macro_result["decision"] == "rejected":
-                g.macro_rejected_count += 1
-
-        # Macro usage tracking
-        macro_names = {m.name for m in self._state.accepted_macros}
-        if any(c.tool_name in macro_names for c in action.plan):
-            g.macro_usage_attempts += 1
-            if sr is not None and sr >= 0.65:
-                g.macro_usage_correct += 1
-
-        # Macro miss penalty tracking
-        g.macro_miss_penalty_total += (pipeline_result.step_macro_miss_penalty or 0.0)
-
-        # Keep completed task count current
-        g.final_completed_tasks = len(self._state.completed_tasks)
-
-        self._state.grading = g
-
-
-    def _analyze_plan(self, plan: List[ToolCall]) -> Dict[str, Any]:
-        """Compute deterministic call accounting from server-side tool registry."""
-
-        available_tools_by_name = {
-            tool.name: tool for tool in self._state.available_tools
-        }
-        unknown_tool_calls: List[str] = []
-
-        for call in plan:
-            tool_def = available_tools_by_name.get(call.tool_name)
-            if tool_def is None:
-                unknown_tool_calls.append(call.tool_name)
-
-        return {
-            "step_call_count": len(plan),
-            "unknown_tool_calls": unknown_tool_calls,
-        }
-
-    def _process_macro_proposal(
-        self,
-        action: ToolForgeAction,
-        can_accept: bool,
-        reject_reason: str,
-    ) -> Dict[str, Any]:
-        """Evaluate and apply macro proposal lifecycle for this step."""
-
-        result: Dict[str, Any] = {
-            "attempted": False,
-            "decision": "none",
-            "name": None,
-            "reason": "no_macro_proposal",
-        }
-
-        has_macro_intent = (
-            action.action_type == "propose_plan_with_macro"
-            or action.macro_proposal is not None
-        )
-        if not has_macro_intent:
-            return result
-
-        result["attempted"] = True
-
-        if action.action_type != "propose_plan_with_macro":
-            return self._reject_macro(
-                result=result,
-                name=action.macro_proposal.name if action.macro_proposal else None,
-                reason="macro_proposal_requires_propose_plan_with_macro_action_type",
-            )
-
-        if action.macro_proposal is None:
-            return self._reject_macro(
-                result=result,
-                name=None,
-                reason="missing_macro_proposal_payload",
-            )
-
-        proposal = action.macro_proposal
-        macro_name = proposal.name.strip()
-
-        if not can_accept:
-            return self._reject_macro(
-                result=result,
-                name=macro_name,
-                reason=reject_reason,
-            )
-
-        if not macro_name:
-            return self._reject_macro(
-                result=result,
-                name=None,
-                reason="macro_name_cannot_be_empty",
-            )
-
-        if not proposal.steps:
-            return self._reject_macro(
-                result=result,
-                name=None,
-                reason="macro_steps_cannot_be_empty",
-            )
-
-
-        existing_names = {tool.name for tool in self._state.available_tools}
-        if macro_name in existing_names:
-            return self._reject_macro(
-                result=result,
-                name=macro_name,
-                reason="macro_name_already_exists",
-            )
-
-        if len(proposal.steps) < 2:
-            return self._reject_macro(
-                result=result,
-                name=macro_name,
-                reason="macro_requires_at_least_two_steps",
-            )
-
-        available_tools_by_name = {
-            tool.name: tool for tool in self._state.available_tools
-        }
-
-        missing_steps = [
-            call.tool_name
-            for call in proposal.steps
-            if call.tool_name not in available_tools_by_name
-        ]
-        if missing_steps:
-            return self._reject_macro(
-                result=result,
-                name=macro_name,
-                reason=f"macro_contains_unknown_tools:{','.join(missing_steps)}",
-            )
-
-        if any(
-            available_tools_by_name[call.tool_name].is_macro
-            for call in proposal.steps
-        ):
-            return self._reject_macro(
-                result=result,
-                name=macro_name,
-                reason="nested_macro_steps_not_supported",
-            )
-
-        composed_of: List[str] = [call.tool_name for call in proposal.steps]
-
-        macro_tool = Tool(
-            name=macro_name,
-            description=proposal.description.strip() or f"Macro: {' -> '.join(composed_of)}",
-            is_macro=True,
-            steps=proposal.steps,
-        )
-
-        self._state.accepted_macros.append(macro_tool)
-        self._state.available_tools.append(macro_tool)
-
-        # Store macro definition for sequence-based recognition tracking
-        self._state.macro_definitions[macro_name] = composed_of
-
-        result["decision"] = "approved"
-        result["name"] = macro_name
-        result["reason"] = "macro_registered"
-        logger.info(
-            "Macro approved: name='%s', steps=%s",
-            macro_name,
-            composed_of,
-        )
-        return result
-
-    def _reject_macro(
-        self,
-        result: Dict[str, Any],
-        name: Optional[str],
-        reason: str,
-    ) -> Dict[str, Any]:
-        """Record macro rejection and return standardized metadata payload."""
-
-        self._state.rejected_macro_count += 1
-        result["decision"] = "rejected"
-        result["name"] = name
-        result["reason"] = reason
-        logger.info("Macro rejected: name='%s', reason='%s'", name, reason)
-        return result
-
-    def _get_next_task_from_generator(self) -> Task:
-        """Return next task from generator supporting get() or get_input()."""
-        print("Prompt change")
-        if self._input_provider is None:
-            raise RuntimeError("Task data generator not initialized. Call reset() first.")
-
-        return self._input_provider.get_input()
-
-    def _sync_task_queue_from_generator(self) -> None:
-        """Best-effort sync of remaining tasks for state visibility."""
-
-        if self._input_provider is None:
-            self._state.task_queue = []
-            return
-
-        if hasattr(self._input_provider, "data") and hasattr(self._input_provider, "idx"):
-            data = getattr(self._input_provider, "data")
-            idx = getattr(self._input_provider, "idx")
-            self._state.task_queue = list(data[idx:])
-            return
-
-        # For generic providers without index access, keep queue opaque.
-        self._state.task_queue = []
 
     def _is_done(self) -> bool:
         """Return True when the current episode should terminate."""
