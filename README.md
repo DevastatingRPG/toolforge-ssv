@@ -137,6 +137,40 @@ ToolForge goes beyond simple tool execution benchmarks. It evaluates an agent's 
 - **Dual-Objective Scoring:** Plans are evaluated on both **semantic accuracy** (did it solve the task?) and **token efficiency** (did it use macros to save tokens?).
 - **Progressive Difficulty:** Tasks range from highly repetitive deployment sprints (easy) to complex, multi-phase infrastructure migrations (hard).
 
+## 📚 Task Curriculums
+
+The environment evaluates agents across **three structured difficulty tiers**, each designed to test progressively advanced capabilities in **tool planning, macro abstraction, and workflow optimization**. Task instances are **dynamically sampled within each curriculum**, preventing memorization and encouraging generalization.
+
+---
+
+| Difficulty | Tier | Curriculum Focus | Active Challenge | Core Competency Evaluated |
+|------------|------|------------------|------------------|---------------------------|
+| `easy`     | 🟢 Foundational | Repetitive workflows | High-frequency, structurally identical tasks | Identifying recurring tool patterns and proposing reusable macros |
+| `medium`   | 🟡 Intermediate | Incident response & operations | Multi-step, goal-driven workflows with branching logic | Adapting plans dynamically while preserving correctness and efficiency |
+| `hard`     | 🔴 Advanced | Complex infrastructure workflows | Multi-phase, order-dependent execution chains | Synthesizing long-horizon plans and abstracting reusable high-level macros |
+
+---
+
+## ⚙️ Action & Observation Spaces
+
+### Action: `ToolForgeAction`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `action_type` | `Literal["propose_plan", "propose_plan_with_macro"]` | Specifies whether the agent submits only a tool execution plan or a plan along with a macro proposal. |
+| `plan` | `List[ToolCall]` | Ordered sequence of tool calls representing the agent’s proposed execution strategy for the task. |
+| `macro_proposal` | `Optional[Tool]` | Optional composite tool abstraction proposed for reuse. Only applicable when `action_type` is `propose_plan_with_macro`. |
+
+---
+
+### Observation: `ToolForgeObservation`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `current_task` | `Task` | The active task containing the prompt, required slots, and baseline expectations. |
+| `available_tools` | `List[Dict[str, Any]]` | List of tools and previously accepted macros available to the agent for planning. |
+| `grading` | `Optional[EpisodeGradingState]` | Aggregated evaluation signals, including reward breakdown and step-level metrics from the evaluation pipeline. |
+
 
 ## Server Setup & Deployment
 
@@ -154,51 +188,37 @@ curl http://localhost:8000/health
 openenv push --repo-id your-org/toolforge-env
 ```
 
-## Core API Surface
 
-### Actions
+## 🛣️ Future Roadmap
 
-**`ToolForgeAction`**
+### 🔓 Open Integration for Real-World Usage
 
-- `action_type`: `"propose_plan"` or `"propose_plan_with_macro"`
-- `plan`: List of `ToolCall`
-- `macro_proposal`: Optional `Tool`
+- The environment is being extended to support **human-in-the-loop prompt interaction** after model training and evaluation on fixed task sets  
+- Enables transition from:
+  - **Benchmarking environment → Practical agent system**  
+- Users will be able to:
+  - Submit custom tasks  
+  - Leverage learned macros  
+  - Evaluate agent efficiency in real workflows  
 
-### Observations
+---
 
-**`ToolForgeObservation`**
+### 🧰 Real Tool Execution via MCP
 
-- `current_task`
-- `available_tools`
-- `reward`
-- `done`
+- Planned integration with **Model Context Protocol (MCP)** to enable:
+  - **Actual tool execution** instead of simulated evaluation  
+  - Dynamic interaction with external systems (APIs, infra, services)  
 
-## The Toolbox
+- This introduces:
+  - Stateful execution environments  
+  - Real-world side effects  
+  - End-to-end automation capabilities  
 
-1. `deploy`
-2. `healthcheck`
-3. `notify`
-4. `rollback`
-5. `scale`
-6. `restart`
+---
 
-## Evaluation & Rewards
+### 🧠 From Simulation to Execution
 
-### Reward Bounds
-
-- Step rewards: `-0.2` to `1.0`
-- Final score: `0.0` to `1.0`
-
-### 5-Stage Evaluation Pipeline
-
-1. Sanity Validation  
-2. Semantic Slot Judgment  
-3. Plan Accuracy Score  
-4. Token Efficiency  
-5. Reward Calculation  
-
-## Task Curriculums
-
-- **Easy:** Repetitive workflows  
-- **Medium:** Incident response  
-- **Hard:** Complex infrastructure workflows  
+```mermaid
+flowchart LR
+    A[Current: Simulated Evaluation] --> B[Hybrid: Validation + Execution]
+    B --> C[Future: Fully Executable Agents]
