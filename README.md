@@ -14,11 +14,37 @@ tags:
   - reinforcement-learning
 ---
 
-# ToolForge Environment
+# 🚀 ToolForge Adaptive Tool Learning Environment
 
-An OpenEnv environment designed to test and train LLM agents in **pattern recognition and macro-tool creation**. 
+A deterministic agent optimization environment designed to evaluate and enhance how AI agents learn reusable tool abstractions from repeated user workflows—reducing redundant reasoning, minimizing token usage, and improving execution efficiency over time.
 
-In ToolForge, agents are tasked with completing sequential DevOps workflows (e.g., deployments, rollbacks, scaling). As agents encounter repetitive sequences of atomic tool calls, they are incentivized to recognize these patterns and compose them into reusable **macro tools**. By using macros, agents save on token consumption (used for thinking, planning, and executing), instantly accessing complex workflows and optimizing their efficiency across the episode.
+## 💡 Why This Problem?
+Modern tool-enabled agents (e.g., using function calling or tool APIs) suffer from a key inefficiency:
+
+- They recompute execution plans from scratch for every request
+- They repeatedly select tools, chain calls, and infer dependencies
+- They fail to generalize recurring workflows across sessions
+
+This results in:
+
+- **High token consumption**
+- **Increased latency**
+- **Redundant reasoning cycles**
+
+Even when tasks are structurally identical, agents behave statelessly—treating each request as a new problem.
+
+---
+
+## 🧠 Core Idea
+flowchart LR
+    A[Repeated Tasks] --> B[Pattern Detection]
+    B --> C[Tool Abstraction]
+    C --> D[Tool Registry]
+    D --> E[Direct Invocation]
+
+ToolForge introduces a learning loop where agents evolve their own toolset.
+
+---
 
 ## What Makes This Different
 

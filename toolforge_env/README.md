@@ -16,6 +16,7 @@ tags:
 
 # ToolForge: Agentic Efficiency through Macro Extraction
 ToolForge is about saving tokens by abstracting tool sequences into reusable **macro tools**, significantly reducing both "thinking" (reasoning) tokens and "calling" (API overhead) tokens. 
+
 ### Core Vision and Impact
 In the current era of agentic AI, models use tools more extensively than ever before. This creates a practical cost and latency problem: models repeatedly spend their reasoning budget to plan and execute the same multi-step tool patterns from scratch.
 This Proof-of-Concept (POC) demonstrates that we can train models to decrease token usage by:
