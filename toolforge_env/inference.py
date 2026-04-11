@@ -66,7 +66,7 @@ SUCCESS_SCORE_THRESHOLD = 0.6  # normalized score in [0, 1]
 TASKS = [
     "easy",
     "medium",
-    "hard",
+    "hard"
 ]
 
 
@@ -214,7 +214,10 @@ def get_model_action(
 async def main() -> None:
     client = OpenAI(base_url=API_BASE_URL, api_key=API_KEY)
 
-    env = await ToolforgeEnv.from_docker_image(IMAGE_NAME, env_vars={"HF_TOKEN": API_KEY})
+    env = await ToolforgeEnv.from_docker_image(IMAGE_NAME, 
+                                               env_vars={"HF_TOKEN": API_KEY, 
+                                                         "API_BASE_URL": API_BASE_URL, 
+                                                         "MODEL_NAME": MODEL_NAME})
     grader = graders.EpisodeGrader()
     task_list = get_task_list()
 
@@ -265,7 +268,7 @@ async def main() -> None:
                     )
 
                     history.append(f"{action.model_dump_json()}|Step {step}|reward {reward:+.2f}|task_id {getattr(task, 'id', 'unknown')}|difficulty {getattr(task, 'difficulty', 'unknown')}")
-                    await asyncio.sleep(10) # brief pause to avoid overwhelming the hf endpoint with rapid requests; adjust as needed based on rate limits and response times
+
                     if done:
                         break
 

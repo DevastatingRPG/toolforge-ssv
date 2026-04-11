@@ -173,8 +173,6 @@ class EpisodeGradingState(BaseModel):
     macro_rejected_count: int = 0
     # Total accumulated macro miss penalty
     macro_miss_penalty_total: float = 0.0
-    # Total tasks completed by episode end
-    final_completed_tasks: int = 0
 
 
 class ToolForgeObservation(Observation):
@@ -353,11 +351,14 @@ class PipelineResult(BaseModel):
     step_slot_ratio: Optional[float] = None
     step_task_complete: Optional[bool] = None
     step_harmful: Optional[bool] = None
+    step_macro_prior_count: Optional[int] = None
+    step_macro_used: Optional[bool] = None
+    step_macro_miss_count: Optional[int] = None
+    step_baseline_calls: Optional[int] = None
+    step_actual_calls: Optional[int] = None
     step_macro_creation_bonus: Optional[float] = None
     step_macro_usage_bonus: Optional[float] = None
     step_macro_miss_penalty: Optional[float] = None
     step_efficiency_score: Optional[float] = None
-
-
 
 

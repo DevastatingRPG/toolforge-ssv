@@ -59,5 +59,6 @@ def create_default_observation(state: ToolForgeState, available_tools_to_prompt_
         available_tools=available_tools_to_prompt_specs(state.available_tools),
         grading = state.grading,
         done= False,
-        reward = 0.0
+        reward = 0.0,
+        metadata={},
     )

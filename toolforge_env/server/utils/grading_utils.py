@@ -65,7 +65,4 @@ def update_grading_state(
     # Macro miss penalty tracking
     g.macro_miss_penalty_total += (pipeline_result.step_macro_miss_penalty or 0.0)
 
-    # Keep completed task count current
-    g.final_completed_tasks = len(state.completed_tasks)
-
     state.grading = g

@@ -46,6 +46,7 @@ try:
     from server.tools import build_atomic_tools
     from server.evaluation.pipeline import run_evaluation_pipeline
     from server.evaluation.plan_evaluator import update_sequence_counts
+    from rubrics import ToolforgeRubric
     from .utils.state_utils import create_default_state, create_default_observation
     from .utils.tool_utils import available_tools_to_prompt_specs, analyze_plan
     from .utils.task_utils import get_next_task_from_generator, advance_to_next_task
@@ -55,6 +56,7 @@ except ImportError:
     from .tools import build_atomic_tools
     from .evaluation.pipeline import run_evaluation_pipeline
     from .evaluation.plan_evaluator import update_sequence_counts
+    from ..rubrics import ToolforgeRubric
     from server.utils.state_utils import create_default_state, create_default_observation
     from server.utils.tool_utils import available_tools_to_prompt_specs, analyze_plan
     from server.utils.task_utils import get_next_task_from_generator, advance_to_next_task
@@ -93,7 +95,8 @@ class ToolforgeEnvironment(Environment):
 
     def __init__(self):
         """Initialize the toolforge_env environment."""
-        super().__init__(transform=None, rubric=None)
+        super().__init__(transform=None, rubric=ToolforgeRubric())
+        self.rubric = ToolforgeRubric()
         self._state = create_default_state()
         self._reset_count = 0
 
@@ -132,6 +135,8 @@ class ToolforgeEnvironment(Environment):
         self._input_provider = self._input_provider_factory(task_list)
         first_task = get_next_task_from_generator(self._input_provider)
         self._state.current_task = first_task
+        if hasattr(self.rubric, "reset"):
+            self.rubric.reset()
         # Reset episode-level macro tracking state
 
         obs = create_default_observation(self._state, available_tools_to_prompt_specs)
@@ -239,20 +244,44 @@ class ToolforgeEnvironment(Environment):
 
         # Note: the macro is added to self._state.available_tools inside _process_macro_proposal()
 
-        # Accumulate grading state from this step
-        update_grading_state(self._state, pipeline_result, macro_result, action)
+        observation_metadata = {
+            "summary": pipeline_result.summary,
+            "validation_result": pipeline_result.validation.model_dump(),
+            "slot_ratio": pipeline_result.step_slot_ratio or 0.0,
+            "task_complete": bool(pipeline_result.step_task_complete),
+            "harmful_calls_present": bool(pipeline_result.step_harmful),
+            "judge_failed": bool(
+                pipeline_result.slot_judgment
+                and getattr(pipeline_result.slot_judgment, "judge_failed", False)
+            ),
+            "macro_prior_count": pipeline_result.step_macro_prior_count,
+            "macro_used": bool(pipeline_result.step_macro_used),
+            "macro_miss_count": pipeline_result.step_macro_miss_count or 0,
+            "baseline_calls": pipeline_result.step_baseline_calls,
+            "actual_calls": pipeline_result.step_actual_calls or step_call_count,
+            "progression": progression,
+            "macro_result": macro_result,
+        }
 
-        # Fetch the scalar reward from the evaluation pipeline
-        reward = float(pipeline_result.reward)
-        print(self._state.current_task.prompt, reward, progression, macro_result)
-        print(f"Done: {self._state.done}{self._is_done()} | Step {self._state.step_count} | Task '{self._state.current_task.id}' | Reward: {reward:.3f} | Progression: {progression} | Macro Proposal: {macro_result}")
-        return ToolForgeObservation(
+        observation = ToolForgeObservation(
             current_task=self._state.current_task,
             available_tools=available_tools_to_prompt_specs(self._state.available_tools),
             done=self._is_done(),
-            reward=reward,
-            grading = self._state.grading
+            reward=0.0,
+            grading=self._state.grading,
+            metadata=observation_metadata,
         )
+
+        reward = float(self._apply_rubric(action, observation))
+        observation.reward = reward
+
+        # Accumulate grading state from this step
+        update_grading_state(self._state, pipeline_result, macro_result, action)
+
+        print(self._state.current_task.prompt, reward, progression, macro_result)
+        print(f"Done: {self._state.done}{self._is_done()} | Step {self._state.step_count} | Task '{self._state.current_task.id}' | Reward: {reward:.3f} | Progression: {progression} | Macro Proposal: {macro_result}")
+        observation.grading = self._state.grading
+        return observation
 
     def _is_done(self) -> bool:
         """Return True when the current episode should terminate."""

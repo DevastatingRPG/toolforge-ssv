@@ -34,6 +34,7 @@ def advance_to_next_task(state: ToolForgeState, input_provider: Optional[InputPr
     """Advance from current task to the next queued task."""
 
     completed_task_id = state.current_task.id
+
     if input_provider is None or input_provider.is_done():
         state.done = True
         logger.info(
