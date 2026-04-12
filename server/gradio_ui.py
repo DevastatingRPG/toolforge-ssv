@@ -11,8 +11,8 @@ ToolForge Gradio UI — Main Entry Point
 Assembles the three-tab Gradio interface and exposes it in two ways:
 
     1. Standalone dev server (port 7860):
-           python gradio_app.py
-           gradio toolforge_env/gradio_app.py
+           python gradio_ui.py
+           gradio toolforge_env/gradio_ui.py
 
     2. Mounted at /web on the FastAPI server (OpenEnv standard, HF Spaces):
            Imported by server/app.py via the `gradio_builder` callable.
@@ -42,10 +42,10 @@ import os
 
 import gradio as gr
 
-from ui.shared   import CUSTOM_CSS
-from ui.demo_tab import build_demo_tab
-from ui.byoa_tab import build_byoa_tab
-from ui.hvl_tab  import build_hvl_tab
+from server.ui.shared   import CUSTOM_CSS
+from server.ui.demo_tab import build_demo_tab
+from server.ui.byoa_tab import build_byoa_tab
+from server.ui.hvl_tab  import build_hvl_tab
 
 # ---------------------------------------------------------------------------
 # Logging configuration
@@ -124,8 +124,8 @@ def build_app() -> gr.Blocks:
 # MODULE-LEVEL DEMO OBJECT
 # ---------------------------------------------------------------------------
 # Gradio expects a top-level `demo` variable when running via `gradio app.py`.
-# We build it once at import time so both `gradio gradio_app.py` and
-# `python gradio_app.py` work correctly.
+# We build it once at import time so both `gradio gradio_ui.py` and
+# `python gradio_ui.py` work correctly.
 #
 # The same object is also returned by `gradio_builder` (below) so that
 # server/app.py can mount it at /web without a second build pass.

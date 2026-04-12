@@ -51,7 +51,7 @@ try:
     from server.tools import AbstractToolStore, create_tool_store
     from server.evaluation.pipeline import run_evaluation_pipeline
     from server.evaluation.plan_evaluator import update_sequence_counts
-    from rubrics import ToolforgeRubric
+    from server.rubrics import ToolforgeRubric
     from .utils.state_utils import create_default_state, create_default_observation
     from .utils.tool_utils import available_tools_to_prompt_specs, analyze_plan
     from .utils.task_utils import get_next_task_from_generator, advance_to_next_task
@@ -61,7 +61,7 @@ except ImportError:
     from .tools import AbstractToolStore, create_tool_store
     from .evaluation.pipeline import run_evaluation_pipeline
     from .evaluation.plan_evaluator import update_sequence_counts
-    from ..rubrics import ToolforgeRubric
+    from .rubrics import ToolforgeRubric
     from server.utils.state_utils import create_default_state, create_default_observation
     from server.utils.tool_utils import available_tools_to_prompt_specs, analyze_plan
     from server.utils.task_utils import get_next_task_from_generator, advance_to_next_task

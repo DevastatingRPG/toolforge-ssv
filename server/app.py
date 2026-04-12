@@ -78,9 +78,9 @@ except ModuleNotFoundError:
 # default OpenEnv Playground tab, then mounts the combined UI at /web.
 # ---------------------------------------------------------------------------
 try:
-    from gradio_app import gradio_builder
+    from server import gradio_builder
 except ModuleNotFoundError:
-    from ..gradio_app import gradio_builder                               # type: ignore[no-redef]
+    from .gradio_ui import gradio_builder                               # type: ignore[no-redef]
 
 # ---------------------------------------------------------------------------
 # Create the FastAPI app with Gradio mounted at /web

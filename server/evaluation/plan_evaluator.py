@@ -23,15 +23,15 @@ from models import (
     ToolCall,
     ValidationResult,
 )
-from server.evaluation.llm_eval_prompts import (
+from .llm_eval_prompts import (
     SLOT_JUDGE_SYSTEM_PROMPT,
     build_slot_judge_user_prompt,
 )
-from server.evaluation.tool_slot_mappings import (
+from .tool_slot_mappings import (
     TOOL_TO_POSSIBLE_SLOTS,
     HARMFUL_TOOLS_TO_REQUIRED_SLOT,
 )
-from server.slots import DEVOPS_SLOTS
+from ..slots import DEVOPS_SLOTS
 
 logger = logging.getLogger(__name__)
 

@@ -40,6 +40,15 @@ STDOUT FORMAT
     [STEP] step=3 action=click('789') reward=1.00 done=true error=null
     [END] success=true steps=3 rewards=0.00,0.00,1.00
 """
+import logging
+
+# Suppress container startup logs - MUST be before other imports
+logging.getLogger("gradio").setLevel(logging.CRITICAL)
+logging.getLogger("httpx").setLevel(logging.CRITICAL)
+logging.getLogger("urllib3").setLevel(logging.CRITICAL)
+logging.getLogger("server").setLevel(logging.CRITICAL)
+logging.getLogger("server.gradio_ui").setLevel(logging.CRITICAL)
+
 
 import asyncio
 import json
@@ -48,11 +57,12 @@ import textwrap
 from typing import List, Optional, Dict, Any
 import time
 
-import graders
+from server import EpisodeGrader
 from openai import OpenAI
 
 from client import ToolforgeEnv
 from models import ToolCall, Tool, ToolForgeAction
+
 IMAGE_NAME = os.getenv("IMAGE_NAME", "openenv-toolforge") # If you are using docker image 
 API_KEY = os.getenv("HF_TOKEN") or os.getenv("API_KEY")
 
@@ -219,7 +229,7 @@ async def main() -> None:
                                                env_vars={"HF_TOKEN": API_KEY, 
                                                          "API_BASE_URL": API_BASE_URL, 
                                                          "MODEL_NAME": MODEL_NAME})
-    grader = graders.EpisodeGrader()
+    grader = EpisodeGrader()
     task_list = get_task_list()
 
     try:
@@ -254,7 +264,7 @@ async def main() -> None:
 
                     reward = result.reward or 0.0
                     done = result.done
-                    error = obs.metadata.get("summary") if isinstance(obs.metadata, dict) else None
+                    error = obs.metadata.get("error") if isinstance(obs.metadata, dict) else None
 
                     rewards.append(reward)
                     steps_taken = step

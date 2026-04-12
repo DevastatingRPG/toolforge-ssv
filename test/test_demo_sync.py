@@ -16,13 +16,13 @@ import sys
 # Ensure the project root is on the path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from ui.demo_tab import (
+from server.ui.demo_tab import (
     _derive_fallback_step,
     _get_scripted_step,
     _compute_btn_label_and_note,
     _blank_outputs,
 )
-from ui.env_client import resolve_env_url
+from server.ui.env_client import resolve_env_url
 
 
 # ===========================================================================

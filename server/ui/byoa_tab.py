@@ -21,7 +21,7 @@ Results:
     - Macro library display
 
 Import pattern (runs from toolforge_env/ dir):
-    from ui.byoa_tab import build_byoa_tab
+    from server.ui.byoa_tab import build_byoa_tab
 """
 
 import json
@@ -34,7 +34,7 @@ from typing import Any, Dict, Generator, List, Optional, Tuple
 import gradio as gr
 import httpx
 
-from ui.shared import (
+from server.ui.shared import (
     ATOMIC_TOOLS,
     SYSTEM_PROMPT,
     render_macro_library_html,
@@ -42,7 +42,7 @@ from ui.shared import (
     render_reward_html,
     render_tools_html,
 )
-from ui.env_client import (
+from server.ui.env_client import (
     DEFAULT_ENV_URL,
     env_reset,
     env_step,

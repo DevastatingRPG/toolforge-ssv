@@ -20,7 +20,7 @@ The demo tab, BYOA tab, and HvL tab all import from here rather than talking
 to the env directly.
 
 Import pattern (matches project convention — runs from toolforge_env/ dir):
-    from ui.env_client import env_reset, env_step, check_env_health
+    from server.ui.env_client import env_reset, env_step, check_env_health
 
 TODO: Add retry logic with exponential back-off for HF Space cold starts.
 TODO: Add request caching / debounce for rapid button presses.

@@ -97,20 +97,8 @@ class EpisodeGrader:
 _grader = EpisodeGrader()
 
 
-def grade_easy(*args, **kwargs) -> float:
-    """Grade an easy-tier episode."""
+def grade(*args, **kwargs) -> float:
+    """Grade an episode."""
     # The framework passes the state as the first positional argument
-    state = args[0] if args else kwargs.get("state")
-    return _grader.grade(state)
-
-
-def grade_medium(*args, **kwargs) -> float:
-    """Grade a medium-tier episode."""
-    state = args[0] if args else kwargs.get("state")
-    return _grader.grade(state)
-
-
-def grade_hard(*args, **kwargs) -> float:
-    """Grade a hard-tier episode."""
     state = args[0] if args else kwargs.get("state")
     return _grader.grade(state)

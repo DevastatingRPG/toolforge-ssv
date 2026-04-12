@@ -33,7 +33,7 @@ Scoring:
                in the UI so the comparison is honest.
 
 Import pattern (runs from toolforge_env/ dir):
-    from ui.hvl_tab import build_hvl_tab
+    from server.ui.hvl_tab import build_hvl_tab
 """
 
 import json
@@ -44,7 +44,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import gradio as gr
 import httpx
 
-from ui.shared import (
+from server.ui.shared import (
     ATOMIC_TOOLS,
     SYSTEM_PROMPT,
     TOOL_DESCRIPTIONS,
@@ -52,7 +52,7 @@ from ui.shared import (
     render_plan_html,
     render_reward_html,
 )
-from ui.env_client import (
+from server.ui.env_client import (
     DEFAULT_ENV_URL,
     env_reset,
     env_step,

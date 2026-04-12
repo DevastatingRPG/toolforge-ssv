@@ -8,7 +8,7 @@
 ui/shared.py — Shared data, constants, and HTML renderers for the ToolForge Gradio UI.
 
 Import pattern (runs from toolforge_env/ dir — no toolforge_env prefix):
-    from ui.shared import SCRIPTED_PROFILES, render_plan_html, ...
+    from server.ui.shared import SCRIPTED_PROFILES, render_plan_html, ...
 
 What lives here:
     SYSTEM_PROMPT       : Default agent system prompt (editable in BYOA tab)

@@ -43,7 +43,7 @@ Stepping lifecycle:
     3. Repeat until env returns done=True.
 
 Import pattern (runs from toolforge_env/ dir):
-    from ui.demo_tab import build_demo_tab
+    from server.ui.demo_tab import build_demo_tab
 """
 
 import logging
@@ -51,7 +51,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import gradio as gr
 
-from ui.shared import (
+from server.ui.shared import (
     ATOMIC_TOOLS,
     SCRIPTED_PROFILES,
     render_macro_library_html,
@@ -59,7 +59,7 @@ from ui.shared import (
     render_reward_html,
     render_tools_html,
 )
-from ui.env_client import (
+from server.ui.env_client import (
     DEFAULT_ENV_URL,
     check_env_health,
     env_reset,

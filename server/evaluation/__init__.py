@@ -7,8 +7,8 @@ Re-exports key functions so consumers can import from either:
     from server.evaluation.plan_evaluator import update_sequence_counts
 """
 
-from server.evaluation.pipeline import run_evaluation_pipeline
-from server.evaluation.plan_evaluator import (
+from .pipeline import run_evaluation_pipeline
+from .plan_evaluator import (
     # Constants
     VALIDATION_PENALTY,
     FINAL_REWARD_MIN,

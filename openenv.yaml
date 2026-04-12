@@ -7,12 +7,12 @@ port: 8000
 tasks:
   - id: easy
     description: "Repetitive deployment, scaling, and rollback drills with highly repeating tool-call patterns."
-    grader: server.graders.grade_easy
+    grader: server.graders.grade
 
   - id: medium
     description: "Goal-driven incident response and traffic-readiness scenarios requiring multi-step reasoning."
-    grader: server.graders.grade_medium
+    grader: server.graders.grade
 
   - id: hard
     description: "Multi-phase infrastructure migration and zero-trust security projects with complex dependencies."
-    grader: server.graders.grade_hard
+    grader: server.graders.grade

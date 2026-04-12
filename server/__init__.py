@@ -12,10 +12,15 @@ from .tools import (
     SeededInMemoryToolStore,
     create_tool_store,
 )
+from .gradio_ui import gradio_builder
+from .graders import (EpisodeGrader, grade)
 
 __all__ = [
     "ToolforgeEnvironment",
     "AbstractToolStore",
+    "gradio_builder",
     "SeededInMemoryToolStore",
     "create_tool_store",
+    "EpisodeGrader",
+    "grade",
 ]
