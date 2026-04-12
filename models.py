@@ -11,7 +11,7 @@ The ToolForge environment is a Tool-Call optimizing environment which abstracts 
 """
 
 from openenv.core.env_server.types import Action, Observation, State
-from typing import Any, Dict, List, Literal, Optional, Tuple
+from typing import Any, Dict, List, Literal, Optional
 from pydantic import Field, BaseModel, ConfigDict, model_validator
 
 # ==============================================================================
@@ -61,7 +61,6 @@ class Tool(BaseModel):
         return self
 
 
-
 class Task(BaseModel):
     """
     Represents a DevOps task that the agent needs to accomplish.
@@ -102,7 +101,6 @@ class Task(BaseModel):
             data["baseline_call_count"] = data["baseline_token_cost"]
 
         return data
-
 
 
 class MacroProposal(BaseModel):
