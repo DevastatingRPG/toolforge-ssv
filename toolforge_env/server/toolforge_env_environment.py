@@ -135,7 +135,7 @@ class ToolforgeEnvironment(Environment):
         self._input_provider = self._input_provider_factory(task_list)
         first_task = get_next_task_from_generator(self._input_provider)
         self._state.current_task = first_task
-        if hasattr(self.rubric, "reset"):
+        if self.rubric and hasattr(self.rubric, "reset"):
             self.rubric.reset()
         # Reset episode-level macro tracking state
 
@@ -278,8 +278,6 @@ class ToolforgeEnvironment(Environment):
         # Accumulate grading state from this step
         update_grading_state(self._state, pipeline_result, macro_result, action)
 
-        print(self._state.current_task.prompt, reward, progression, macro_result)
-        print(f"Done: {self._state.done}{self._is_done()} | Step {self._state.step_count} | Task '{self._state.current_task.id}' | Reward: {reward:.3f} | Progression: {progression} | Macro Proposal: {macro_result}")
         observation.grading = self._state.grading
         return observation
 

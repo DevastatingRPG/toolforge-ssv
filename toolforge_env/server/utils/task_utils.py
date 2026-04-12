@@ -24,7 +24,6 @@ logger = logging.getLogger(__name__)
 
 def get_next_task_from_generator(input_provider: Optional[InputProvider]) -> Task:
     """Return next task from generator supporting get() or get_input()."""
-    print("Prompt change")
     if input_provider is None:
         raise RuntimeError("Task data generator not initialized. Call reset() first.")
 
