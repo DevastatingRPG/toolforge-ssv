@@ -5,22 +5,24 @@
 # LICENSE file in the root directory of this source tree.
 
 from uuid import uuid4
+from typing import List
 try:
     from ...models import (
+        Tool,
         ToolForgeState,
         Task,
         ToolForgeObservation,
     )
 except ImportError:
     from models import (
+        Tool,
         ToolForgeState,
         Task,
         ToolForgeObservation,
     )
 
-from server.tools import build_atomic_tools
 
-def create_default_state() -> ToolForgeState:
+def create_default_state(available_tools: List[Tool]) -> ToolForgeState:
     """
     Create a default ToolForgeState with basic parameters.
 
@@ -39,7 +41,7 @@ def create_default_state() -> ToolForgeState:
         episode_id=str(uuid4()),
         step_count=0,
         current_task=default_task,
-        available_tools=build_atomic_tools(),
+        available_tools=[tool.model_copy(deep=True) for tool in available_tools],
         accepted_macros=[],
         rejected_macro_count=0,
         call_history=[],

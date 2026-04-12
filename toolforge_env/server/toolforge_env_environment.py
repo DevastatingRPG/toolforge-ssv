@@ -16,7 +16,7 @@ from uuid import uuid4
 
 from openenv.core.env_server.interfaces import Environment
 from openenv.core.env_server.types import EnvironmentMetadata, State
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 try:
     from .inputs.base import InputProvider
@@ -29,6 +29,8 @@ except ImportError:
 
 try:
     from ..models import (
+        Tool,
+        ToolCall,
         ToolForgeAction,
         ToolForgeObservation,
         ToolForgeState,
@@ -36,6 +38,7 @@ try:
     )
 except ImportError:
     from models import (
+        Tool,
         ToolForgeAction,
         ToolForgeObservation,
         ToolForgeState,
@@ -43,7 +46,7 @@ except ImportError:
     )
 
 try:
-    from server.tools import build_atomic_tools
+    from server.tools import AbstractToolStore, create_tool_store
     from server.evaluation.pipeline import run_evaluation_pipeline
     from server.evaluation.plan_evaluator import update_sequence_counts
     from rubrics import ToolforgeRubric
@@ -53,7 +56,7 @@ try:
     from .utils.macro_utils import process_macro_proposal
     from .utils.grading_utils import update_grading_state
 except ImportError:
-    from .tools import build_atomic_tools
+    from .tools import AbstractToolStore, create_tool_store
     from .evaluation.pipeline import run_evaluation_pipeline
     from .evaluation.plan_evaluator import update_sequence_counts
     from ..rubrics import ToolforgeRubric
@@ -93,15 +96,23 @@ class ToolforgeEnvironment(Environment):
     # Hard guardrail to ensure episodes terminate deterministically.
     MAX_EPISODE_STEPS: int = 100
 
-    def __init__(self):
+    def __init__(
+        self,
+        tool_store_factory: Callable[[], AbstractToolStore] = create_tool_store,
+        input_provider_factory: Callable[[Dict], InputProvider] = create_input_provider,
+    ):
         """Initialize the toolforge_env environment."""
         super().__init__(transform=None, rubric=ToolforgeRubric())
         self.rubric = ToolforgeRubric()
-        self._state = create_default_state()
+
+        self._tool_store_factory = tool_store_factory
+        self._tool_store = self._tool_store_factory()
+
+        self._state = create_default_state(self._tool_store.get_all_tools())
         self._reset_count = 0
 
         self._task_selector = TaskSelector()
-        self._input_provider_factory = create_input_provider
+        self._input_provider_factory = input_provider_factory
         self._input_provider: Optional[InputProvider] = None
 
         # persistent config
@@ -124,20 +135,20 @@ class ToolforgeEnvironment(Environment):
         """
         ep_id = episode_id if episode_id is not None else str(uuid4())
 
-        self._state = create_default_state()
+        self._tool_store = self._tool_store_factory()
+        self._state = create_default_state(self._tool_store.get_all_tools())
         self._state.episode_id = ep_id
         self._reset_count += 1
         resolved_task_id = task_id or kwargs.get("task_id", "easy")
 
         # subsequent resets ignore incoming values
         task_list = self._task_selector.next_task_list(resolved_task_id)
-
         self._input_provider = self._input_provider_factory(task_list)
+
         first_task = get_next_task_from_generator(self._input_provider)
         self._state.current_task = first_task
-        if hasattr(self.rubric, "reset"):
+        if self.rubric and hasattr(self.rubric, "reset"):
             self.rubric.reset()
-        # Reset episode-level macro tracking state
 
         obs = create_default_observation(self._state, available_tools_to_prompt_specs)
         return obs
@@ -153,55 +164,93 @@ class ToolforgeEnvironment(Environment):
             ToolForgeObservation with the echoed message and its length
         """
         if self._is_done():
-            obs_terminal = create_default_observation(self._state, available_tools_to_prompt_specs)
-            obs_terminal.done = True
-            obs_terminal.reward = 0.0
-            obs_terminal.metadata = {
-                "summary": "Episode already completed.",
-                "terminal": True,
-            }
-            return obs_terminal
+            return self._build_terminal_observation()
 
         if not isinstance(action, ToolForgeAction):
-            logger.warning(
-                "Malformed action rejected. Expected ToolForgeAction, got %s",
-                type(action).__name__,
-            )
-            self._state.step_count += 1
+            return self._handle_malformed_action(action)
 
-            # Track malformed actions in grading state
-            self._state.grading.episode_steps += 1
-            self._state.grading.validation_failures += 1
+        step_call_count = self._begin_step(action)
 
-            progression = "advanced_to_next_task_malformed_action"
-            if self._state.step_count >= self.MAX_EPISODE_STEPS:
-                self._state.done = True
-                progression = "episode_terminated_max_steps"
-            else:
-                advanced = advance_to_next_task(self._state, self._input_provider)
-                progression = "advanced_to_next_task" if advanced else "episode_completed"
+        pipeline_result = self._evaluate_plan(action)
 
-            obs_malformed = create_default_observation(self._state, available_tools_to_prompt_specs)
-            obs_malformed.done = self._is_done()
-            obs_malformed.reward = 0.0
-            obs_malformed.metadata = {
-                "summary": "Malformed action treated as failed attempt.",
-                "malformed_action": True,
-                "plan_accepted": False,
-                "task_prompt": self._state.current_task.prompt,
-                "task_level": self._state.current_task.difficulty,
-                "progression": progression,
-            }
-            return obs_malformed
+        self._record_sequence_and_macro_usage(action.plan)
 
+        progression = self._advance_episode_progression()
+
+        print(action)
+        macro_result = process_macro_proposal(
+            action=action,
+            state=self._state,
+            tool_store=self._tool_store,
+            can_accept=bool(pipeline_result.passed_validation),
+            reject_reason="plan_not_accepted",
+        )
+        # Note: the macro is added to self._state.available_tools inside _process_macro_proposal()
+
+        observation = self._build_step_observation(
+            action=action,
+            pipeline_result=pipeline_result,
+            progression=progression,
+            macro_result=macro_result,
+            step_call_count=step_call_count,
+        )
+
+        # Accumulate grading state from this step
+        update_grading_state(self._state, pipeline_result, macro_result, action)
+
+        observation.grading = self._state.grading
+        return observation
+
+    def _is_done(self) -> bool:
+        """Return True when the current episode should terminate."""
+
+        return bool(self._state.done) or self._state.step_count >= self.MAX_EPISODE_STEPS
+
+    def _advance_episode_progression(self) -> str:
+        """Advance episode state after a step and return the resulting progression label."""
+        if self._state.step_count >= self.MAX_EPISODE_STEPS:
+            self._state.done = True
+            return "episode_terminated_max_steps"
+
+        advanced = advance_to_next_task(self._state, self._input_provider)
+        return "advanced_to_next_task" if advanced else "episode_completed"
+
+    def _build_terminal_observation(self) -> ToolForgeObservation:
+        """Return the terminal observation when the episode is already complete."""
+        observation = create_default_observation(self._state, available_tools_to_prompt_specs)
+        observation.done = True
+        observation.reward = 0.0
+        observation.metadata = {
+            "summary": "Episode already completed.",
+            "terminal": True,
+        }
+        return observation
+
+    def _begin_step(self, action: ToolForgeAction) -> int:
+        """Apply step bookkeeping and return the plan call count."""
         self._state.step_count += 1
+        self._state.available_tools = self._tool_store.get_all_tools()
 
         plan_accounting = analyze_plan(action.plan, self._state.available_tools)
         step_call_count = plan_accounting["step_call_count"]
-        
+
         self._state.call_history.extend(action.plan)
         self._state.tokens_used += step_call_count
+        return step_call_count
 
+    def _evaluate_plan(self, action: ToolForgeAction) -> Any:
+        """
+        Evaluate the plan from the action through the evaluation pipeline.
+
+        Builds the available tools dict and runs the evaluation pipeline to validate
+        and grade the proposed plan against the current task.
+
+        Args:
+            action: ToolForgeAction containing the plan to evaluate
+
+        Returns:
+            PipelineResult with validation, grading, and step metrics
+        """
         available_tools_by_name = {
             tool.name: tool for tool in self._state.available_tools
         }
@@ -215,36 +264,42 @@ class ToolforgeEnvironment(Environment):
             macro_definitions=self._state.macro_definitions,
             macro_proposal=action.macro_proposal,
         )
+        return pipeline_result
 
-        # Update sequence counts AFTER pipeline evaluation so recognition uses prior counts only
-        update_sequence_counts(action.plan, self._state.sequence_counts)
+    def _record_sequence_and_macro_usage(self, plan: List["ToolCall"]) -> None:
+        """Record post-evaluation sequence counts and macro usage statistics."""
+        update_sequence_counts(plan, self._state.sequence_counts)
 
-        # Update macro usage counts for any macro tools used in this plan
-        macro_names = {m.name for m in self._state.accepted_macros}
-        for call in action.plan:
+        macro_names = {macro.name for macro in self._state.accepted_macros}
+        for call in plan:
             if call.tool_name in macro_names:
                 self._state.macro_usage_counts[call.tool_name] = (
                     self._state.macro_usage_counts.get(call.tool_name, 0) + 1
                 )
 
-        progression = "advanced_to_next_task"
-        if self._state.step_count >= self.MAX_EPISODE_STEPS:
-            self._state.done = True
-            progression = "episode_terminated_max_steps"
-        else:
-            advanced = advance_to_next_task(self._state, self._input_provider)
-            progression = "advanced_to_next_task" if advanced else "episode_completed"
+    def _build_observation_metadata(
+        self,
+        pipeline_result: Any,
+        progression: str,
+        macro_result: Dict,
+        step_call_count: int,
+    ) -> Dict:
+        """
+        Build the observation metadata dict from pipeline and step results.
 
-        macro_result = process_macro_proposal(
-            action=action,
-            state=self._state,
-            can_accept=bool(pipeline_result.passed_validation),
-            reject_reason="plan_not_accepted",
-        )
+        Assembles all step metrics, validation results, and progression info
+        into a single metadata dictionary for the observation.
 
-        # Note: the macro is added to self._state.available_tools inside _process_macro_proposal()
+        Args:
+            pipeline_result: PipelineResult from evaluation
+            progression: Progression label (e.g., "advanced_to_next_task")
+            macro_result: Macro proposal handling result
+            step_call_count: Number of calls in the plan from _begin_step
 
-        observation_metadata = {
+        Returns:
+            Dict with all observation metadata fields
+        """
+        return {
             "summary": pipeline_result.summary,
             "validation_result": pipeline_result.validation.model_dump(),
             "slot_ratio": pipeline_result.step_slot_ratio or 0.0,
@@ -263,6 +318,37 @@ class ToolforgeEnvironment(Environment):
             "macro_result": macro_result,
         }
 
+    def _build_step_observation(
+        self,
+        action: ToolForgeAction,
+        pipeline_result: Any,
+        progression: str,
+        macro_result: Dict,
+        step_call_count: int,
+    ) -> ToolForgeObservation:
+        """
+        Build the step observation including metadata and rubric application.
+
+        Constructs a complete ToolForgeObservation with metadata from the step,
+        applies the rubric to compute the reward, and returns the observation.
+
+        Args:
+            action: The ToolForgeAction that was executed
+            pipeline_result: PipelineResult from evaluation
+            progression: Episode progression label
+            macro_result: Macro proposal result
+            step_call_count: Plan call count from _begin_step
+
+        Returns:
+            ToolForgeObservation with rubric-computed reward
+        """
+        observation_metadata = self._build_observation_metadata(
+            pipeline_result=pipeline_result,
+            progression=progression,
+            macro_result=macro_result,
+            step_call_count=step_call_count,
+        )
+
         observation = ToolForgeObservation(
             current_task=self._state.current_task,
             available_tools=available_tools_to_prompt_specs(self._state.available_tools),
@@ -272,21 +358,38 @@ class ToolforgeEnvironment(Environment):
             metadata=observation_metadata,
         )
 
+        # Apply rubric to compute reward
         reward = float(self._apply_rubric(action, observation))
         observation.reward = reward
 
-        # Accumulate grading state from this step
-        update_grading_state(self._state, pipeline_result, macro_result, action)
-
-        print(self._state.current_task.prompt, reward, progression, macro_result)
-        print(f"Done: {self._state.done}{self._is_done()} | Step {self._state.step_count} | Task '{self._state.current_task.id}' | Reward: {reward:.3f} | Progression: {progression} | Macro Proposal: {macro_result}")
-        observation.grading = self._state.grading
         return observation
 
-    def _is_done(self) -> bool:
-        """Return True when the current episode should terminate."""
+    def _handle_malformed_action(self, action: Any) -> ToolForgeObservation:
+        """Treat malformed actions as failed attempts and advance episode state."""
+        logger.warning(
+            "Malformed action rejected. Expected ToolForgeAction, got %s",
+            type(action).__name__,
+        )
+        self._state.step_count += 1
 
-        return bool(self._state.done) or self._state.step_count >= self.MAX_EPISODE_STEPS
+        # Track malformed actions in grading state.
+        self._state.grading.episode_steps += 1
+        self._state.grading.validation_failures += 1
+
+        progression = self._advance_episode_progression()
+
+        observation = create_default_observation(self._state, available_tools_to_prompt_specs)
+        observation.done = self._is_done()
+        observation.reward = 0.0
+        observation.metadata = {
+            "summary": "Malformed action treated as failed attempt.",
+            "malformed_action": True,
+            "plan_accepted": False,
+            "task_prompt": self._state.current_task.prompt,
+            "task_level": self._state.current_task.difficulty,
+            "progression": progression,
+        }
+        return observation
 
     @property
     def state(self) -> State:
@@ -300,7 +403,7 @@ class ToolforgeEnvironment(Environment):
 
     def get_metadata(self) -> EnvironmentMetadata:
         """Return descriptive metadata about this environment."""
-
+        
         return EnvironmentMetadata(
             name="toolforge_env",
             description=(
