@@ -21,10 +21,12 @@ from typing import Any, Callable, Dict, List, Optional
 try:
     from .inputs.base import InputProvider
     from .inputs.simulated.task_selector import TaskSelector
+    from .inputs.simulated.data_loader import SimulatedDataLoader
     from .inputs.factory import create_input_provider
 except ImportError:
     from server.inputs.base import InputProvider
     from server.inputs.simulated.task_selector import TaskSelector
+    from server.inputs.simulated.data_loader import SimulatedDataLoader
     from server.inputs.factory import create_input_provider
 
 try:
@@ -145,12 +147,22 @@ class ToolforgeEnvironment(Environment):
         task_list = self._task_selector.next_task_list(resolved_task_id)
         self._input_provider = self._input_provider_factory(task_list)
 
-        first_task = get_next_task_from_generator(self._input_provider)
-        self._state.current_task = first_task
+        total_tasks: int = (
+            self._input_provider.task_count()
+            if isinstance(self._input_provider, SimulatedDataLoader)
+            else 0
+        )
+
+        if self._input_provider is not None:
+            first_task = get_next_task_from_generator(self._input_provider)
+            self._state.current_task = first_task
+
         if self.rubric and hasattr(self.rubric, "reset"):
             self.rubric.reset()
 
-        obs = create_default_observation(self._state, available_tools_to_prompt_specs)
+        obs = create_default_observation(self._state, available_tools_to_prompt_specs, total_tasks)
+        # Surface episode length so the UI can navigate without relying on env.done
+        # obs.metadata = {"total_tasks": total_tasks}
         return obs
 
     def step(self, action: ToolForgeAction) -> ToolForgeObservation:  # type: ignore[override]
@@ -216,7 +228,7 @@ class ToolforgeEnvironment(Environment):
 
     def _build_terminal_observation(self) -> ToolForgeObservation:
         """Return the terminal observation when the episode is already complete."""
-        observation = create_default_observation(self._state, available_tools_to_prompt_specs)
+        observation = create_default_observation(self._state, available_tools_to_prompt_specs, 0)
         observation.done = True
         observation.reward = 0.0
         observation.metadata = {
@@ -377,7 +389,7 @@ class ToolforgeEnvironment(Environment):
 
         progression = self._advance_episode_progression()
 
-        observation = create_default_observation(self._state, available_tools_to_prompt_specs)
+        observation = create_default_observation(self._state, available_tools_to_prompt_specs, 0)
         observation.done = self._is_done()
         observation.reward = 0.0
         observation.metadata = {

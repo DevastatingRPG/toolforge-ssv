@@ -49,7 +49,7 @@ def create_default_state(available_tools: List[Tool]) -> ToolForgeState:
         done=False,
     )
 
-def create_default_observation(state: ToolForgeState, available_tools_to_prompt_specs) -> ToolForgeObservation:
+def create_default_observation(state: ToolForgeState, available_tools_to_prompt_specs, total_tasks: int) -> ToolForgeObservation:
     """
     Create a default ToolForgeObservation with basic parameters.
 
@@ -62,5 +62,5 @@ def create_default_observation(state: ToolForgeState, available_tools_to_prompt_
         grading = state.grading,
         done= False,
         reward = 0.0,
-        metadata={},
+        metadata={"total_tasks": total_tasks},
     )

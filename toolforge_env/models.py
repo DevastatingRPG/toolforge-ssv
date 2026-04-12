@@ -187,6 +187,18 @@ class ToolForgeObservation(Observation):
     grading: Optional[EpisodeGradingState] = None
     """Episode-level grading signals accumulated during the episode"""
 
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+    """Observation metadata including total_tasks indicator"""
+
+    def model_dump(self, **kwargs) -> Dict[str, Any]:
+        """Override model_dump to prevent metadata from being excluded by env serializers."""
+        exclude = kwargs.get("exclude")
+        if isinstance(exclude, set) and "metadata" in exclude:
+            exclude = set(exclude)
+            exclude.discard("metadata")
+            kwargs["exclude"] = exclude
+        return super().model_dump(**kwargs)
+
 
 class ToolForgeState(State):
     """

@@ -71,7 +71,6 @@ class ToolforgeEnv(
             **obs_data,
             done=payload.get("done", False),
             reward=payload.get("reward"),
-            metadata=obs_data.get("metadata", {}),
         )
 
         return StepResult(
