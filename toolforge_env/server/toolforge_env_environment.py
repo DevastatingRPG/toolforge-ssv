@@ -16,7 +16,7 @@ from uuid import uuid4
 
 from openenv.core.env_server.interfaces import Environment
 from openenv.core.env_server.types import EnvironmentMetadata, State
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 try:
     from .inputs.base import InputProvider
@@ -29,6 +29,7 @@ except ImportError:
 
 try:
     from ..models import (
+        Tool,
         ToolForgeAction,
         ToolForgeObservation,
         ToolForgeState,
@@ -36,6 +37,7 @@ try:
     )
 except ImportError:
     from models import (
+        Tool,
         ToolForgeAction,
         ToolForgeObservation,
         ToolForgeState,
@@ -43,7 +45,7 @@ except ImportError:
     )
 
 try:
-    from server.tools import build_atomic_tools
+    from server.tools import AbstractToolStore, create_tool_store
     from server.evaluation.pipeline import run_evaluation_pipeline
     from server.evaluation.plan_evaluator import update_sequence_counts
     from rubrics import ToolforgeRubric
@@ -53,7 +55,7 @@ try:
     from .utils.macro_utils import process_macro_proposal
     from .utils.grading_utils import update_grading_state
 except ImportError:
-    from .tools import build_atomic_tools
+    from .tools import AbstractToolStore, create_tool_store
     from .evaluation.pipeline import run_evaluation_pipeline
     from .evaluation.plan_evaluator import update_sequence_counts
     from ..rubrics import ToolforgeRubric
@@ -93,15 +95,23 @@ class ToolforgeEnvironment(Environment):
     # Hard guardrail to ensure episodes terminate deterministically.
     MAX_EPISODE_STEPS: int = 100
 
-    def __init__(self):
+    def __init__(
+        self,
+        tool_store_factory: Callable[[], AbstractToolStore] = create_tool_store,
+        input_provider_factory: Callable[[Dict], InputProvider] = create_input_provider,
+    ):
         """Initialize the toolforge_env environment."""
         super().__init__(transform=None, rubric=ToolforgeRubric())
         self.rubric = ToolforgeRubric()
-        self._state = create_default_state()
+
+        self._tool_store_factory = tool_store_factory
+        self._tool_store = self._tool_store_factory()
+
+        self._state = create_default_state(self._tool_store.get_all_tools())
         self._reset_count = 0
 
         self._task_selector = TaskSelector()
-        self._input_provider_factory = create_input_provider
+        self._input_provider_factory = input_provider_factory
         self._input_provider: Optional[InputProvider] = None
 
         # persistent config
@@ -124,20 +134,20 @@ class ToolforgeEnvironment(Environment):
         """
         ep_id = episode_id if episode_id is not None else str(uuid4())
 
-        self._state = create_default_state()
+        self._tool_store = self._tool_store_factory()
+        self._state = create_default_state(self._tool_store.get_all_tools())
         self._state.episode_id = ep_id
         self._reset_count += 1
         resolved_task_id = task_id or kwargs.get("task_id", "easy")
 
         # subsequent resets ignore incoming values
         task_list = self._task_selector.next_task_list(resolved_task_id)
-
         self._input_provider = self._input_provider_factory(task_list)
+
         first_task = get_next_task_from_generator(self._input_provider)
         self._state.current_task = first_task
         if self.rubric and hasattr(self.rubric, "reset"):
             self.rubric.reset()
-        # Reset episode-level macro tracking state
 
         obs = create_default_observation(self._state, available_tools_to_prompt_specs)
         return obs
@@ -196,6 +206,7 @@ class ToolforgeEnvironment(Environment):
 
         self._state.step_count += 1
 
+        self._state.available_tools = self._tool_store.get_all_tools()
         plan_accounting = analyze_plan(action.plan, self._state.available_tools)
         step_call_count = plan_accounting["step_call_count"]
         
@@ -235,9 +246,11 @@ class ToolforgeEnvironment(Environment):
             advanced = advance_to_next_task(self._state, self._input_provider)
             progression = "advanced_to_next_task" if advanced else "episode_completed"
 
+        print(action)
         macro_result = process_macro_proposal(
             action=action,
             state=self._state,
+            tool_store=self._tool_store,
             can_accept=bool(pipeline_result.passed_validation),
             reject_reason="plan_not_accepted",
         )
