@@ -55,7 +55,18 @@ async def main():
     finally:
         await env.close()
 ```
+## 🧪 Try It Live (Hugging Face Spaces)
 
+> [!TIP]
+> A live version of ToolForge is available on Hugging Face Spaces:  
+> **https://huggingface.co/spaces/ShubhamSarkar04/toolforge-env**
+>
+> 👉 Use the different tabs to explore:
+> - **Demo** → Run pre-configured agents on tasks  
+> - **Bring Your Own Model** → Plug in your own LLM  
+> - **Custom** → Submit your own prompts and compete with the agent  
+>
+> No setup required — everything runs in-browser.
 
 ## 💡 Why This Problem?
 Modern tool-enabled AI agents (e.g., using function calling or tool APIs) suffer from a key inefficiency:
@@ -109,6 +120,36 @@ flowchart TD
     classDef error fill:#ef4444,color:#fff
     classDef data fill:#a855f7,color:#fff
 ```
+## 🔌 Open Integration Design
+
+ToolForge is built to transition from simulation to real-world usage without changing agent logic.
+
+### Key Abstractions
+
+- **InputProvider** → Decouples task source  
+  - Today: simulated tasks  
+  - Future: human input / APIs / live systems  
+  - Enables human-in-the-loop interaction  
+
+  > Ref: [`InputProvider interface`](./server/inputs/base.py)
+
+- **ToolStore** → Decouples tool execution  
+  - Today: in-memory simulated tools  
+  - Future: real tools via MCP / external APIs  
+  - Learned macros behave like real tools  
+
+  > Ref: [`AbstractToolStore`](./server/tools/base.py)
+
+---
+
+### 🚀 What This Enables
+
+- Swap **simulated tasks → real users**
+- Swap **mock tools → real systems**
+- Reuse learned macros in production
+
+> *Train in simulation. Deploy without rewriting.*
+
 ---
 
 ## 🔍 Evaluation Pipeline
