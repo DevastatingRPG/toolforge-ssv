@@ -78,10 +78,14 @@ Even when tasks are structurally identical, agents behave statelessly—treating
 
 ```mermaid
 flowchart LR
-    A[Repeated Tasks] --> B[Pattern Detection]
-    B --> C[Tool Abstraction]
-    C --> D[Tool Registry]
-    D --> E[Direct Invocation]
+    A[Repeated Tasks]:::process --> B[Pattern Detection]:::process
+    B --> C[Tool Abstraction]:::process
+    C --> D[Tool Registry]:::data
+    D --> E[Direct Invocation]:::success
+
+    classDef process fill:#3b82f6,color:#fff,stroke:#1e40af
+    classDef success fill:#22c55e,color:#fff,stroke:#166534
+    classDef data fill:#a855f7,color:#fff,stroke:#6b21a8
 ```
 ToolForge introduces a learning loop where agents evolve their own toolset.
 
@@ -90,44 +94,77 @@ ToolForge introduces a learning loop where agents evolve their own toolset.
 
 ```mermaid
 flowchart TD
-    A[Input Provider] --> B[LLM Agent]
-    B --> C[Tool Plan Proposal]
-    B --> D["Macro Proposal (Optional)"]
-    C --> E[Evaluation Engine]
+    A[Input Provider]:::process --> B[LLM Agent]:::process
+    B --> C[Tool Plan Proposal]:::process
+    B --> D[Macro Proposal]:::data
+    C --> E[Evaluation Engine]:::process
     D --> E
-    E --> F{Accepted?}
-    F -- Yes --> G[Persist Macro + Reward]
-    F -- No --> H[Reject / Penalize]
+    E --> F{Accepted?}:::decision
+    F -- Yes --> G[Persist Macro + Reward]:::success
+    F -- No --> H[Reject / Penalize]:::error
+
+    classDef process fill:#3b82f6,color:#fff
+    classDef decision fill:#eab308,color:#000
+    classDef success fill:#22c55e,color:#fff
+    classDef error fill:#ef4444,color:#fff
+    classDef data fill:#a855f7,color:#fff
 ```
 ---
 
 ## 🔍 Evaluation Pipeline
 ```mermaid
 flowchart TD
-    A[Plan + Macro Proposal] --> B[Sanity Validation]
-    B -->|Fail| X["Immediate Penalty (-0.2)"]
+    A[Plan + Macro Proposal]:::process --> B[Sanity Validation]:::process
+    B -->|Fail| X[Penalty -0.2]:::error
+    B -->|Pass| C[Slot Judgment]:::decision
 
-    B -->|Pass| C[Slot Judgment]
-    C -->|Harmful Calls| Y["Immediate Min Reward (-0.2)"]
-    C -->|Judge Failure| Z[Zero Reward]
+    C -->|Harmful Calls| Y[Min Reward -0.2]:::error
+    C -->|Judge Failure| Z[Zero Reward]:::error
+    C -->|Valid| D[Reward Feature Extraction]:::process
 
-    C --> D[Reward Feature Extraction]
-    D --> E[Rubric Scoring Engine]
-    E --> F["Final Reward ∈ [-0.2, 1.0]"]
+    D --> E[Scoring Engine]:::process
+    E --> F[Final Reward]:::success
+
+    classDef process fill:#3b82f6,color:#fff
+    classDef decision fill:#eab308,color:#000
+    classDef success fill:#22c55e,color:#fff
+    classDef error fill:#ef4444,color:#fff
 ```
 - Strict short-circuiting ensures invalid or unsafe plans are penalized early
 - Final reward is bounded between -0.2 and 1.0
 ---
 
-<!-- ## 🧪 Evaluation Criteria (Detailed)
-1. **Sanity Validation (Hard Gate)**
+## 📊 Episode Grading
 
+At the end of each episode, the agent receives a **final score ∈ [0.01, 0.99]** based on overall performance.
+
+### 🧮 Scoring Breakdown
+
+```mermaid
+pie title Episode Score Weights
+    "Accuracy" : 40
+    "Token Optimization" : 30
+    "Macro Creation" : 20
+    "Macro Usage" : 10
 ```
+
+### 📈 How It Works
+
+```mermaid
 flowchart LR
-    A[Plan] -> B{Valid Tool Calls?}
-    B -- No -> C[Penalty: -0.2]
-    B -- Yes D[Proceed] ->
-``` -->
+    A[Episode Metrics]:::process --> B[Sub-scores]:::process
+    B --> C[Weighted Sum]:::process
+    C --> D[Clamped Score]:::success
+
+    classDef process fill:#3b82f6,color:#fff
+    classDef success fill:#22c55e,color:#fff
+```
+- Accuracy → correctness of plans
+- Token Optimization → efficiency on correct plans
+- Macro Creation → quality of proposed macros
+- Macro Usage → correct reuse of macros
+
+Final score prioritizes correctness first, then efficiency and abstraction.
 
 ## What Makes This Different
 
@@ -220,5 +257,10 @@ openenv push --repo-id your-org/toolforge-env
 
 ```mermaid
 flowchart LR
-    A[Current: Simulated Evaluation] --> B[Hybrid: Validation + Execution]
-    B --> C[Future: Fully Executable Agents]
+    A[Simulated Evaluation]:::process --> B[Hybrid System]:::decision
+    B --> C[Fully Executable Agents]:::success
+
+    classDef process fill:#3b82f6,color:#fff
+    classDef decision fill:#eab308,color:#000
+    classDef success fill:#22c55e,color:#fff
+```

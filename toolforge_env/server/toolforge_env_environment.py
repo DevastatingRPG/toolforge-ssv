@@ -177,7 +177,6 @@ class ToolforgeEnvironment(Environment):
 
         progression = self._advance_episode_progression()
 
-        print(action)
         macro_result = process_macro_proposal(
             action=action,
             state=self._state,
