@@ -7,5 +7,15 @@
 """Toolforge Env environment server components."""
 
 from .toolforge_env_environment import ToolforgeEnvironment
+from .tools import (
+    AbstractToolStore,
+    SeededInMemoryToolStore,
+    create_tool_store,
+)
 
-__all__ = ["ToolforgeEnvironment"]
+__all__ = [
+    "ToolforgeEnvironment",
+    "AbstractToolStore",
+    "SeededInMemoryToolStore",
+    "create_tool_store",
+]

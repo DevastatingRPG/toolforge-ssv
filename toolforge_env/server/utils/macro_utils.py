@@ -18,12 +18,17 @@ except ImportError:
         ToolForgeAction,
         ToolForgeState,
     )
+try:
+    from ..tools import AbstractToolStore
+except ImportError:
+    from server.tools import AbstractToolStore
 
 logger = logging.getLogger(__name__)
 
 def process_macro_proposal(
     action: ToolForgeAction,
     state: ToolForgeState,
+    tool_store: AbstractToolStore,
     can_accept: bool,
     reject_reason: str,
 ) -> Dict[str, Any]:
@@ -88,9 +93,7 @@ def process_macro_proposal(
             reason="macro_steps_cannot_be_empty",
         )
 
-
-    existing_names = {tool.name for tool in state.available_tools}
-    if macro_name in existing_names:
+    if tool_store.get_tool(macro_name) is not None:
         return reject_macro(
             result=result,
             state=state,
@@ -106,14 +109,10 @@ def process_macro_proposal(
             reason="macro_requires_at_least_two_steps",
         )
 
-    available_tools_by_name = {
-        tool.name: tool for tool in state.available_tools
-    }
-
     missing_steps = [
         call.tool_name
         for call in proposal.steps
-        if call.tool_name not in available_tools_by_name
+        if tool_store.get_tool(call.tool_name) is None
     ]
     if missing_steps:
         return reject_macro(
@@ -124,7 +123,7 @@ def process_macro_proposal(
         )
 
     if any(
-        available_tools_by_name[call.tool_name].is_macro
+        (tool := tool_store.get_tool(call.tool_name)) is not None and tool.is_macro
         for call in proposal.steps
     ):
         return reject_macro(
@@ -143,8 +142,9 @@ def process_macro_proposal(
         steps=proposal.steps,
     )
 
+    tool_store.add_tool(macro_tool)
     state.accepted_macros.append(macro_tool)
-    state.available_tools.append(macro_tool)
+    state.available_tools = tool_store.get_all_tools()
 
     # Store macro definition for sequence-based recognition tracking
     state.macro_definitions[macro_name] = composed_of

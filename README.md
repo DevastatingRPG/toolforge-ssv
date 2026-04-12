@@ -14,11 +14,157 @@ tags:
   - reinforcement-learning
 ---
 
-# ToolForge Environment
+# 🚀 ToolForge Adaptive Tool Learning Environment
 
-An OpenEnv environment designed to test and train LLM agents in **pattern recognition and macro-tool creation**. 
+A deterministic agent optimization environment designed to evaluate and enhance how AI agents learn reusable tool abstractions from repeated user workflows—reducing redundant reasoning, minimizing token usage, and improving execution efficiency over time.
 
-In ToolForge, agents are tasked with completing sequential DevOps workflows (e.g., deployments, rollbacks, scaling). As agents encounter repetitive sequences of atomic tool calls, they are incentivized to recognize these patterns and compose them into reusable **macro tools**. By using macros, agents save on token consumption (used for thinking, planning, and executing), instantly accessing complex workflows and optimizing their efficiency across the episode.
+## Quick Start
+
+```python
+import asyncio
+from client import ToolforgeEnv
+from models import ToolForgeAction, ToolCall, Tool
+
+async def main():
+    try:
+        # Connect to the live HuggingFace Space
+        with ToolForgeEnv.from_env("ShubhamSarkar04/toolforge-env") as env:
+            # Reset the environment with a specific task tier
+            result = await env.reset(task_id="easy")
+            obs = result.observation
+            
+            print("== USER TASK ==")
+            print(obs.current_task.prompt)
+            print("== AVAILABLE TOOLS ==")
+            print(obs.available_tools)
+
+            # Step — submit the agent's plan of action
+            action = ToolForgeAction(
+                action_type="propose_plan",
+                plan=[
+                    ToolCall(tool_name="deploy"),
+                    ToolCall(tool_name="healthcheck"),
+                    ToolCall(tool_name="notify")
+                ]
+            )
+            result = await env.step(action)
+            
+            print(f"\nScore: {result.reward:.2f}")
+            print(f"Feedback: {result.observation.feedback}")
+
+    finally:
+        await env.close()
+```
+
+
+## 💡 Why This Problem?
+Modern tool-enabled agents (e.g., using function calling or tool APIs) suffer from a key inefficiency:
+
+- They recompute execution plans from scratch for every request
+- They repeatedly select tools, chain calls, and infer dependencies
+- They fail to generalize recurring workflows across sessions
+
+This results in:
+
+- **High token consumption**
+- **Increased latency**
+- **Redundant reasoning cycles**
+
+Even when tasks are structurally identical, agents behave statelessly—treating each request as a new problem.
+
+---
+
+## 🧠 Core Idea
+
+```mermaid
+flowchart LR
+    A[Repeated Tasks]:::process --> B[Pattern Detection]:::process
+    B --> C[Tool Abstraction]:::process
+    C --> D[Tool Registry]:::data
+    D --> E[Direct Invocation]:::success
+
+    classDef process fill:#3b82f6,color:#fff,stroke:#1e40af
+    classDef success fill:#22c55e,color:#fff,stroke:#166534
+    classDef data fill:#a855f7,color:#fff,stroke:#6b21a8
+```
+ToolForge introduces a learning loop where agents evolve their own toolset.
+
+---
+## ⚙️ Current Environment Architecture
+
+```mermaid
+flowchart TD
+    A[Input Provider]:::process --> B[LLM Agent]:::process
+    B --> C[Tool Plan Proposal]:::process
+    B --> D[Macro Proposal]:::data
+    C --> E[Evaluation Engine]:::process
+    D --> E
+    E --> F{Accepted?}:::decision
+    F -- Yes --> G[Persist Macro + Reward]:::success
+    F -- No --> H[Reject / Penalize]:::error
+
+    classDef process fill:#3b82f6,color:#fff
+    classDef decision fill:#eab308,color:#000
+    classDef success fill:#22c55e,color:#fff
+    classDef error fill:#ef4444,color:#fff
+    classDef data fill:#a855f7,color:#fff
+```
+---
+
+## 🔍 Evaluation Pipeline
+```mermaid
+flowchart TD
+    A[Plan + Macro Proposal]:::process --> B[Sanity Validation]:::process
+    B -->|Fail| X[Penalty -0.2]:::error
+    B -->|Pass| C[Slot Judgment]:::decision
+
+    C -->|Harmful Calls| Y[Min Reward -0.2]:::error
+    C -->|Judge Failure| Z[Zero Reward]:::error
+    C -->|Valid| D[Reward Feature Extraction]:::process
+
+    D --> E[Scoring Engine]:::process
+    E --> F[Final Reward]:::success
+
+    classDef process fill:#3b82f6,color:#fff
+    classDef decision fill:#eab308,color:#000
+    classDef success fill:#22c55e,color:#fff
+    classDef error fill:#ef4444,color:#fff
+```
+- Strict short-circuiting ensures invalid or unsafe plans are penalized early
+- Final reward is bounded between -0.2 and 1.0
+---
+
+## 📊 Episode Grading
+
+At the end of each episode, the agent receives a **final score ∈ [0.01, 0.99]** based on overall performance.
+
+### 🧮 Scoring Breakdown
+
+```mermaid
+pie title Episode Score Weights
+    "Accuracy" : 40
+    "Token Optimization" : 30
+    "Macro Creation" : 20
+    "Macro Usage" : 10
+```
+
+### 📈 How It Works
+
+```mermaid
+flowchart LR
+    A[Episode Metrics]:::process --> B[Sub-scores]:::process
+    B --> C[Weighted Sum]:::process
+    C --> D[Clamped Score]:::success
+
+    classDef process fill:#3b82f6,color:#fff
+    classDef success fill:#22c55e,color:#fff
+```
+- Accuracy → correctness of plans
+- Token Optimization → efficiency on correct plans
+- Macro Creation → quality of proposed macros
+- Macro Usage → correct reuse of macros
+
+Final score prioritizes correctness first, then efficiency and abstraction.
 
 ## What Makes This Different
 
@@ -28,49 +174,40 @@ ToolForge goes beyond simple tool execution benchmarks. It evaluates an agent's 
 - **Dual-Objective Scoring:** Plans are evaluated on both **semantic accuracy** (did it solve the task?) and **token efficiency** (did it use macros to save tokens?).
 - **Progressive Difficulty:** Tasks range from highly repetitive deployment sprints (easy) to complex, multi-phase infrastructure migrations (hard).
 
-## Quick Start
+## 📚 Task Curriculums
 
-```python
-from toolforge_env_environment import ToolforgeEnvironment
-from models import ToolForgeAction, ToolCall, Tool
+The environment evaluates agents across **three structured difficulty tiers**, each designed to test progressively advanced capabilities in **tool planning, macro abstraction, and workflow optimization**. Task instances are **dynamically sampled within each curriculum**, preventing memorization and encouraging generalization.
 
-env = ToolforgeEnvironment()
-result = env.reset(mode="eval", difficulty="easy")
+---
 
-print(f"Task: {result.current_task.prompt}")
+| Difficulty | Tier | Curriculum Focus | Active Challenge | Core Competency Evaluated |
+|------------|------|------------------|------------------|---------------------------|
+| `easy`     | 🟢 Foundational | Repetitive workflows | High-frequency, structurally identical tasks | Identifying recurring tool patterns and proposing reusable macros |
+| `medium`   | 🟡 Intermediate | Incident response & operations | Multi-step, goal-driven workflows with branching logic | Adapting plans dynamically while preserving correctness and efficiency |
+| `hard`     | 🔴 Advanced | Complex infrastructure workflows | Multi-phase, order-dependent execution chains | Synthesizing long-horizon plans and abstracting reusable high-level macros |
 
-action = ToolForgeAction(
-    action_type="propose_plan",
-    plan=[
-        ToolCall(tool_name="deploy"),
-        ToolCall(tool_name="healthcheck"),
-        ToolCall(tool_name="notify")
-    ]
-)
-result = env.step(action)
-print(f"Reward: {result.reward}")
+---
 
-macro_action = ToolForgeAction(
-    action_type="propose_plan_with_macro",
-    plan=[
-        ToolCall(tool_name="deploy"),
-        ToolCall(tool_name="healthcheck"),
-        ToolCall(tool_name="notify")
-    ],
-    macro_proposal=Tool(
-        name="deploy_verify_notify",
-        description="Standard deployment pipeline",
-        is_macro=True,
-        token_cost=1, 
-        steps=[
-            ToolCall(tool_name="deploy"),
-            ToolCall(tool_name="healthcheck"),
-            ToolCall(tool_name="notify")
-        ]
-    )
-)
-result = env.step(macro_action)
-```
+## ⚙️ Action & Observation Spaces
+
+### Action: `ToolForgeAction`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `action_type` | `Literal["propose_plan", "propose_plan_with_macro"]` | Specifies whether the agent submits only a tool execution plan or a plan along with a macro proposal. |
+| `plan` | `List[ToolCall]` | Ordered sequence of tool calls representing the agent’s proposed execution strategy for the task. |
+| `macro_proposal` | `Optional[Tool]` | Optional composite tool abstraction proposed for reuse. Only applicable when `action_type` is `propose_plan_with_macro`. |
+
+---
+
+### Observation: `ToolForgeObservation`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `current_task` | `Task` | The active task containing the prompt, required slots, and baseline expectations. |
+| `available_tools` | `List[Dict[str, Any]]` | List of tools and previously accepted macros available to the agent for planning. |
+| `grading` | `Optional[EpisodeGradingState]` | Aggregated evaluation signals, including reward breakdown and step-level metrics from the evaluation pipeline. |
+
 
 ## Server Setup & Deployment
 
@@ -88,51 +225,42 @@ curl http://localhost:8000/health
 openenv push --repo-id your-org/toolforge-env
 ```
 
-## Core API Surface
 
-### Actions
+## 🛣️ Future Roadmap
 
-**`ToolForgeAction`**
+### 🔓 Open Integration for Real-World Usage
 
-- `action_type`: `"propose_plan"` or `"propose_plan_with_macro"`
-- `plan`: List of `ToolCall`
-- `macro_proposal`: Optional `Tool`
+- The environment is being extended to support **human-in-the-loop prompt interaction** after model training and evaluation on fixed task sets  
+- Enables transition from:
+  - **Benchmarking environment → Practical agent system**  
+- Users will be able to:
+  - Submit custom tasks  
+  - Leverage learned macros  
+  - Evaluate agent efficiency in real workflows  
 
-### Observations
+---
 
-**`ToolForgeObservation`**
+### 🧰 Real Tool Execution via MCP
 
-- `current_task`
-- `available_tools`
-- `reward`
-- `done`
+- Planned integration with **Model Context Protocol (MCP)** to enable:
+  - **Actual tool execution** instead of simulated evaluation  
+  - Dynamic interaction with external systems (APIs, infra, services)  
 
-## The Toolbox
+- This introduces:
+  - Stateful execution environments  
+  - Real-world side effects  
+  - End-to-end automation capabilities  
 
-1. `deploy`
-2. `healthcheck`
-3. `notify`
-4. `rollback`
-5. `scale`
-6. `restart`
+---
 
-## Evaluation & Rewards
+### 🧠 From Simulation to Execution
 
-### Reward Bounds
+```mermaid
+flowchart LR
+    A[Simulated Evaluation]:::process --> B[Hybrid System]:::decision
+    B --> C[Fully Executable Agents]:::success
 
-- Step rewards: `-0.2` to `1.0`
-- Final score: `0.0` to `1.0`
-
-### 5-Stage Evaluation Pipeline
-
-1. Sanity Validation  
-2. Semantic Slot Judgment  
-3. Plan Accuracy Score  
-4. Token Efficiency  
-5. Reward Calculation  
-
-## Task Curriculums
-
-- **Easy:** Repetitive workflows  
-- **Medium:** Incident response  
-- **Hard:** Complex infrastructure workflows  
+    classDef process fill:#3b82f6,color:#fff
+    classDef decision fill:#eab308,color:#000
+    classDef success fill:#22c55e,color:#fff
+```
