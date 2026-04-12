@@ -215,7 +215,7 @@ The environment evaluates agents across **three structured difficulty tiers**, e
 
 ```bash
 docker build -t toolforge-env:latest -f server/Dockerfile .
-docker run --rm -p 8000:8000 toolforge-env:latest
+docker run --rm -p 8000:8000 -e ENABLE_WEB_INTERFACE=true toolforge-env:latest
 curl http://localhost:8000/health
 ```
 
