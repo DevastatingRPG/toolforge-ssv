@@ -418,9 +418,8 @@ class ToolforgeEnvironment(Environment):
         return EnvironmentMetadata(
             name="toolforge_env",
             description=(
-                "A DevOps benchmark where an LLM agent learns to identify "
-                "recurring tool-call patterns and compose them into reusable "
-                "macro tools to minimise token consumption."
+                "A deterministic agent optimization environment designed to evaluate and enhance how AI agents learn reusable tool abstractions from repeated user workflows—reducing redundant reasoning, minimizing token usage, and improving execution efficiency over time."
             ),
             version="0.1.0",
+            readme_content="A deterministic agent optimization environment designed to evaluate and enhance how AI agents learn reusable tool abstractions from repeated user workflows—reducing redundant reasoning, minimizing token usage, and improving execution efficiency over time."
         )
