@@ -147,64 +147,118 @@ TOOL_DESCRIPTIONS: Dict[str, str] = {
 SCRIPTED_PROFILES: Dict[str, Dict[str, List[Dict[str, Any]]]] = {
 
     # -----------------------------------------------------------------------
-    # GPT-4o (simulated) — Fast learner: proposes macro by step 3, reuses by 4
+    # GPT-4o (simulated) — Starts rough, then quickly learns macro usage
     # -----------------------------------------------------------------------
     "GPT-4o (simulated)": {
         "easy": [
-            # ---- Episode 1: easy-deployment-sprints (4 tasks) -------------
             {
-                "episode_id":    "easy-deployment-sprints",
+                "episode_id": "easy-deployment-sprints",
                 "episode_label": "Deployment Sprints",
                 "steps": [
                     {
-                        "plan":           ["deploy", "healthcheck", "notify"],
+                        "plan": ["deploy", "notify"],
                         "macro_proposed": None,
-                        "note":           "Agent executes the canonical 3-step deployment pipeline correctly.",
+                        "note": "Weak start: misses verification step.",
                     },
                     {
-                        "plan":           ["deploy", "healthcheck", "notify"],
-                        "macro_proposed": None,
-                        "note":           "Same pattern repeated. Agent internally tracks this sequence.",
-                    },
-                    {
-                        "plan":           ["deploy", "healthcheck", "notify"],
+                        "plan": ["deploy_notify_fast"],
                         "macro_proposed": {
-                            "name":  "deploy_verify_notify",
+                            "name": "deploy_notify_fast",
+                            "steps": ["deploy", "notify"],
+                        },
+                        "note": "Bad macro behavior: proposes and immediately uses a low-quality 2-step macro.",
+                    },
+                    {
+                        "plan": ["deploy", "healthcheck", "notify"],
+                        "macro_proposed": None,
+                        "note": "Recovers with complete atomic execution.",
+                    },
+                    {
+                        "plan": ["deploy", "healthcheck", "notify"],
+                        "macro_proposed": {
+                            "name": "deploy_verify_notify",
                             "steps": ["deploy", "healthcheck", "notify"],
                         },
-                        "note": (
-                            "Pattern seen 3 times. Agent proposes macro 'deploy_verify_notify'. "
-                            "Macro creation bonus applied on top of slot score."
-                        ),
+                        "note": "Proposes the correct reusable deployment macro.",
                     },
                     {
-                        "plan":           ["deploy_verify_notify"],
+                        "plan": ["deploy_verify_notify"],
                         "macro_proposed": None,
-                        "note": (
-                            "Agent reuses 'deploy_verify_notify'. 2 turns saved vs baseline. "
-                            "Macro usage bonus and efficiency score both applied."
-                        ),
+                        "note": "Uses the good macro after stabilization.",
                     },
                 ],
             },
-
-            # ---- Episode 2: easy-resource-management (macros reset) -------
             {
-                "episode_id":    "easy-resource-management",
+                "episode_id": "easy-resource-management",
                 "episode_label": "Resource Management",
                 "steps": [
                     {
-                        "plan":           ["scale", "ping", "notify"],
+                        "plan": ["scale", "notify"],
                         "macro_proposed": None,
-                        "note":           "New episode — macros reset by env. New pattern (scale→ping→notify).",
+                        "note": "Starts under-complete (missing verification).",
                     },
                     {
-                        "plan":           ["restart", "healthcheck", "notify"],
+                        "plan": ["scale_notify_fast"],
                         "macro_proposed": {
-                            "name":  "restart_check_notify",
+                            "name": "scale_notify_fast",
+                            "steps": ["scale", "notify"],
+                        },
+                        "note": "Bad macro attempt on an incomplete pattern.",
+                    },
+                    {
+                        "plan": ["scale", "ping", "notify"],
+                        "macro_proposed": None,
+                        "note": "Improves to full scale verification flow.",
+                    },
+                    {
+                        "plan": ["restart", "healthcheck", "notify"],
+                        "macro_proposed": {
+                            "name": "restart_check_notify",
                             "steps": ["restart", "healthcheck", "notify"],
                         },
-                        "note": "Agent proposes 'restart_check_notify' for the restart→healthcheck→notify pattern.",
+                        "note": "Introduces a stronger restart macro.",
+                    },
+                    {
+                        "plan": ["restart_check_notify"],
+                        "macro_proposed": None,
+                        "note": "Efficient macro reuse after learning.",
+                    },
+                ],
+            },
+            {
+                "episode_id": "easy-rollback-drills",
+                "episode_label": "Rollback Drills",
+                "steps": [
+                    {
+                        "plan": ["rollback", "notify"],
+                        "macro_proposed": None,
+                        "note": "Initial rollback plan skips verification.",
+                    },
+                    {
+                        "plan": ["rollback_notify_quick"],
+                        "macro_proposed": {
+                            "name": "rollback_notify_quick",
+                            "steps": ["rollback", "notify"],
+                        },
+                        "note": "Bad macro proposal/use on incomplete rollback pattern.",
+                    },
+                    {
+                        "plan": ["rollback", "healthcheck", "notify"],
+                        "macro_proposed": None,
+                        "note": "Correct rollback flow restored.",
+                    },
+                    {
+                        "plan": ["rollback", "healthcheck", "notify"],
+                        "macro_proposed": {
+                            "name": "rollback_verify_notify",
+                            "steps": ["rollback", "healthcheck", "notify"],
+                        },
+                        "note": "Proposes robust rollback macro.",
+                    },
+                    {
+                        "plan": ["rollback_verify_notify"],
+                        "macro_proposed": None,
+                        "note": "Final efficient execution with macro.",
                     },
                 ],
             },
@@ -212,58 +266,118 @@ SCRIPTED_PROFILES: Dict[str, Dict[str, List[Dict[str, Any]]]] = {
     },
 
     # -----------------------------------------------------------------------
-    # Llama 3 (simulated) — Moderate: one unnecessary call, late macro
+    # Llama 3 (simulated) — Learns slower, improves by late steps
     # -----------------------------------------------------------------------
     "Llama 3 (simulated)": {
         "easy": [
-            # ---- Episode 1: easy-deployment-sprints -----------------------
             {
-                "episode_id":    "easy-deployment-sprints",
+                "episode_id": "easy-deployment-sprints",
                 "episode_label": "Deployment Sprints",
                 "steps": [
                     {
-                        "plan":           ["deploy", "healthcheck", "notify"],
+                        "plan": ["deploy", "notify"],
                         "macro_proposed": None,
-                        "note":           "Correct but slightly lower slot score from conservative LLM reasoning.",
+                        "note": "Under-complete first attempt.",
                     },
                     {
-                        "plan":           ["deploy", "run_tests", "healthcheck", "notify"],
-                        "macro_proposed": None,
-                        "note": (
-                            "Agent added 'run_tests' unnecessarily. 4 calls vs baseline 3. "
-                            "Harmless but reduces efficiency score."
-                        ),
-                    },
-                    {
-                        "plan":           ["deploy", "healthcheck", "notify"],
-                        "macro_proposed": None,
-                        "note":           "Back to correct atomic plan. Macro opportunity missed again.",
-                    },
-                    {
-                        "plan":           ["deploy", "healthcheck", "notify"],
+                        "plan": ["deploy_notify_fast"],
                         "macro_proposed": {
-                            "name":  "deploy_pipeline",
+                            "name": "deploy_notify_fast",
+                            "steps": ["deploy", "notify"],
+                        },
+                        "note": "Bad macro proposal/use repeated.",
+                    },
+                    {
+                        "plan": ["deploy", "run_tests", "healthcheck", "notify"],
+                        "macro_proposed": None,
+                        "note": "Now complete but slightly inefficient.",
+                    },
+                    {
+                        "plan": ["deploy", "healthcheck", "notify"],
+                        "macro_proposed": {
+                            "name": "deploy_verify_notify",
                             "steps": ["deploy", "healthcheck", "notify"],
                         },
-                        "note":           "Late macro recognition on step 4. Still earns creation bonus.",
+                        "note": "Finds correct macro pattern later.",
+                    },
+                    {
+                        "plan": ["deploy_verify_notify"],
+                        "macro_proposed": None,
+                        "note": "Ends with efficient macro usage.",
                     },
                 ],
             },
-
-            # ---- Episode 2: easy-resource-management ----------------------
             {
-                "episode_id":    "easy-resource-management",
+                "episode_id": "easy-resource-management",
                 "episode_label": "Resource Management",
                 "steps": [
                     {
-                        "plan":           ["scale", "ping", "notify"],
+                        "plan": ["restart", "notify"],
                         "macro_proposed": None,
-                        "note":           "New episode — macros reset. New slot pattern.",
+                        "note": "Starts with missing verification.",
                     },
                     {
-                        "plan":           ["restart", "healthcheck", "notify"],
+                        "plan": ["restart_notify_short"],
+                        "macro_proposed": {
+                            "name": "restart_notify_short",
+                            "steps": ["restart", "notify"],
+                        },
+                        "note": "Bad macro behavior on incomplete sequence.",
+                    },
+                    {
+                        "plan": ["scale", "ping", "notify"],
                         "macro_proposed": None,
-                        "note":           "Agent completes correctly but doesn't propose a second macro yet.",
+                        "note": "Better slot coverage on scaling tasks.",
+                    },
+                    {
+                        "plan": ["restart", "healthcheck", "notify"],
+                        "macro_proposed": {
+                            "name": "restart_check_notify",
+                            "steps": ["restart", "healthcheck", "notify"],
+                        },
+                        "note": "Finally proposes useful macro.",
+                    },
+                    {
+                        "plan": ["restart_check_notify"],
+                        "macro_proposed": None,
+                        "note": "Stable macro reuse.",
+                    },
+                ],
+            },
+            {
+                "episode_id": "easy-rollback-drills",
+                "episode_label": "Rollback Drills",
+                "steps": [
+                    {
+                        "plan": ["rollback", "notify"],
+                        "macro_proposed": None,
+                        "note": "Partial rollback plan at start.",
+                    },
+                    {
+                        "plan": ["rollback_notify_short"],
+                        "macro_proposed": {
+                            "name": "rollback_notify_short",
+                            "steps": ["rollback", "notify"],
+                        },
+                        "note": "Weak macro proposal/use.",
+                    },
+                    {
+                        "plan": ["rollback", "healthcheck", "notify"],
+                        "macro_proposed": None,
+                        "note": "Correct rollback sequence.",
+                    },
+                    {
+                        "plan": ["rollback", "healthcheck", "notify"],
+                        "macro_proposed": {
+                            "name": "rollback_verify_notify",
+                            "steps": ["rollback", "healthcheck", "notify"],
+                        },
+                        "note": "Macro quality improves.",
+                    },
+                    {
+                        "plan": ["rollback_verify_notify"],
+                        "macro_proposed": None,
+                        "note": "Efficient finish.",
                     },
                 ],
             },
@@ -271,61 +385,118 @@ SCRIPTED_PROFILES: Dict[str, Dict[str, List[Dict[str, Any]]]] = {
     },
 
     # -----------------------------------------------------------------------
-    # Mistral (simulated) — Inconsistent: incomplete plan, one harmful call
+    # Mistral (simulated) — More error-prone, then recovers progressively
     # -----------------------------------------------------------------------
     "Mistral (simulated)": {
         "easy": [
-            # ---- Episode 1: easy-deployment-sprints -----------------------
             {
-                "episode_id":    "easy-deployment-sprints",
+                "episode_id": "easy-deployment-sprints",
                 "episode_label": "Deployment Sprints",
                 "steps": [
                     {
-                        "plan":           ["deploy", "notify"],
+                        "plan": ["deploy", "notify"],
                         "macro_proposed": None,
-                        "note": (
-                            "Missed 'healthcheck' (deployment_verification slot unfilled). "
-                            "slot_ratio = 0.67 — above threshold but incomplete."
-                        ),
+                        "note": "Misses verification on first step.",
                     },
                     {
-                        "plan":           ["deploy", "healthcheck", "notify"],
-                        "macro_proposed": None,
-                        "note":           "Correct full plan this time.",
+                        "plan": ["rollback", "notify"],
+                        "macro_proposed": {
+                            "name": "rollback_notify_short",
+                            "steps": ["rollback", "notify"],
+                        },
+                        "note": "Bad early macro behavior and poor tool choice for deployment context.",
                     },
                     {
-                        "plan":           ["rollback", "healthcheck", "notify"],
+                        "plan": ["deploy", "healthcheck", "notify"],
                         "macro_proposed": None,
-                        "note": (
-                            "⚠️ HARMFUL CALL: 'rollback' during a deployment task is destructive. "
-                            "Pipeline short-circuited. Penalty applied by env."
-                        ),
+                        "note": "Recovers to correct atomic pattern.",
                     },
                     {
-                        "plan":           ["deploy", "healthcheck", "notify"],
+                        "plan": ["deploy", "healthcheck", "notify"],
+                        "macro_proposed": {
+                            "name": "deploy_verify_notify",
+                            "steps": ["deploy", "healthcheck", "notify"],
+                        },
+                        "note": "Improves by proposing proper macro.",
+                    },
+                    {
+                        "plan": ["deploy_verify_notify"],
                         "macro_proposed": None,
-                        "note":           "Recovery. Correct plan, no macro proposed.",
+                        "note": "Ends on efficient macro reuse.",
                     },
                 ],
             },
-
-            # ---- Episode 2: easy-resource-management ----------------------
             {
-                "episode_id":    "easy-resource-management",
+                "episode_id": "easy-resource-management",
                 "episode_label": "Resource Management",
                 "steps": [
                     {
-                        "plan":           ["scale", "ping", "notify"],
+                        "plan": ["scale", "notify"],
                         "macro_proposed": None,
-                        "note":           "New episode — macros reset. Correct plan on new pattern.",
+                        "note": "Incomplete initial scaling plan.",
                     },
                     {
-                        "plan":           ["restart", "healthcheck", "notify"],
+                        "plan": ["scale_notify_short"],
                         "macro_proposed": {
-                            "name":  "op_and_notify",
+                            "name": "scale_notify_short",
+                            "steps": ["scale", "notify"],
+                        },
+                        "note": "Bad macro behavior repeated.",
+                    },
+                    {
+                        "plan": ["scale", "ping", "notify"],
+                        "macro_proposed": None,
+                        "note": "Corrects slot coverage.",
+                    },
+                    {
+                        "plan": ["restart", "healthcheck", "notify"],
+                        "macro_proposed": {
+                            "name": "restart_check_notify",
                             "steps": ["restart", "healthcheck", "notify"],
                         },
-                        "note":           "Recovers strongly. Proposes a macro on step 2 of episode 2.",
+                        "note": "Learns a reusable pattern.",
+                    },
+                    {
+                        "plan": ["restart_check_notify"],
+                        "macro_proposed": None,
+                        "note": "Macro reuse stabilizes execution.",
+                    },
+                ],
+            },
+            {
+                "episode_id": "easy-rollback-drills",
+                "episode_label": "Rollback Drills",
+                "steps": [
+                    {
+                        "plan": ["rollback", "notify"],
+                        "macro_proposed": None,
+                        "note": "Starts with partial rollback flow.",
+                    },
+                    {
+                        "plan": ["rollback_notify_short"],
+                        "macro_proposed": {
+                            "name": "rollback_notify_short",
+                            "steps": ["rollback", "notify"],
+                        },
+                        "note": "Low-quality macro proposal/use.",
+                    },
+                    {
+                        "plan": ["rollback", "healthcheck", "notify"],
+                        "macro_proposed": None,
+                        "note": "Improves to complete rollback behavior.",
+                    },
+                    {
+                        "plan": ["rollback", "healthcheck", "notify"],
+                        "macro_proposed": {
+                            "name": "rollback_verify_notify",
+                            "steps": ["rollback", "healthcheck", "notify"],
+                        },
+                        "note": "Proposes solid rollback macro.",
+                    },
+                    {
+                        "plan": ["rollback_verify_notify"],
+                        "macro_proposed": None,
+                        "note": "Finishes with efficient macro use.",
                     },
                 ],
             },
