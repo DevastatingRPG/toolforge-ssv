@@ -51,30 +51,6 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import gradio as gr
 
-# ---------------------------------------------------------------------------
-# Inline-style HTML helpers — no CSS class dependency, always visible even
-# when this child app is mounted inside OpenEnv's root TabbedInterface.
-# ---------------------------------------------------------------------------
-_DIVIDER = (
-    "<div style='border:none;border-top:3px solid #7c3aed;"
-    "margin:22px 0 18px;opacity:0.65;'></div>"
-)
-
-def _sec_hdr(text: str) -> str:
-    """Bold section title with purple left-bar accent."""
-    return (
-        f"<div style='border-left:4px solid #7c3aed;padding:5px 14px;"
-        f"margin:4px 0 14px;font-size:1.05em;font-weight:700;color:#e2e8f0;'>"
-        f"{text}</div>"
-    )
-
-def _sub_hdr(text: str) -> str:
-    """Smaller purple sub-section heading."""
-    return (
-        f"<div style='font-size:0.90em;font-weight:600;color:#a78bfa;"
-        f"margin:10px 0 5px;'>{text}</div>"
-    )
-
 from server.ui.shared import (
     ATOMIC_TOOLS,
     SCRIPTED_PROFILES,
@@ -760,11 +736,11 @@ def build_demo_tab() -> gr.Tab:
                 placeholder="http://localhost:8000",
                 scale=4,
             )
-            test_env_btn = gr.Button("Test Connection", scale=1)
+            test_env_btn = gr.Button("🔗 Test Connection", scale=1)
 
         env_status_html = gr.HTML(value="")
 
-        gr.HTML(_DIVIDER)
+        gr.HTML("<hr style='border-color:#374151;margin:8px 0;'>")
 
         # -------------------------------------------------------------------
         # SIMULATION CONTROLS
@@ -776,11 +752,11 @@ def build_demo_tab() -> gr.Tab:
                 label="Model Profile",
                 scale=3,
             )
-            run_btn = gr.Button("Run Simulation", variant="primary", scale=2)
+            run_btn = gr.Button("▶ Run Simulation", variant="primary", scale=2)
 
         gr.Markdown(f"*{DISCLAIMER_TEXT}*")
 
-        gr.HTML(_DIVIDER)
+        gr.HTML("<hr style='border-color:#374151;margin:8px 0;'>")
 
         # -------------------------------------------------------------------
         # MAIN TWO-COLUMN LAYOUT
@@ -806,7 +782,7 @@ def build_demo_tab() -> gr.Tab:
                     interactive=False,
                 )
 
-                gr.HTML(_sub_hdr("Available Tools <span style='color:#6b7280;font-weight:400;'>(purple = macro)</span>"))
+                gr.Markdown("**🔧 Available Tools** *(purple = macro)*")
                 available_tools_html = gr.HTML(
                     value="<div style='color:#9ca3af;padding:8px;'>Connect env to see tools.</div>"
                 )
@@ -822,12 +798,12 @@ def build_demo_tab() -> gr.Tab:
             # ===============================================================
             with gr.Column(scale=1):
 
-                gr.HTML(_sub_hdr("Agent Plan"))
+                gr.Markdown("**🤖 Agent Plan**")
                 agent_plan_html = gr.HTML(
                     value="<p style='color:#9ca3af;'>No plan yet.</p>"
                 )
 
-                gr.HTML(_sub_hdr("Step Reward <span style='color:#6b7280;font-weight:400;'>(real env score)</span>"))
+                gr.Markdown("**🏆 Step Reward** *(real env score)*")
                 reward_html = gr.HTML(value=render_reward_html(0.0))
 
                 with gr.Row():
@@ -840,7 +816,7 @@ def build_demo_tab() -> gr.Tab:
                         value=0, interactive=False, precision=0,
                     )
 
-                gr.HTML(_sub_hdr("Macro Library"))
+                gr.Markdown("**⚙ Macro Library**")
                 macro_library_html = gr.HTML(value=render_macro_library_html([]))
 
         # Agent note — full width
@@ -854,16 +830,16 @@ def build_demo_tab() -> gr.Tab:
         # Status bar for env errors
         step_status_html = gr.HTML(value="")
 
-        gr.HTML(_DIVIDER)
+        gr.HTML("<hr style='border-color:#374151;margin:8px 0;'>")
 
         # -------------------------------------------------------------------
         # NAVIGATION ROW
         # -------------------------------------------------------------------
         with gr.Row():
-            prev_btn      = gr.Button("← Previous", scale=1)
+            prev_btn      = gr.Button("◀ Previous Step", scale=1)
             thinking_html = gr.HTML(value="", visible=True)
-            next_btn      = gr.Button("Next Step →", variant="secondary", scale=1)
-            auto_play_btn = gr.Button("Auto Play", variant="secondary", scale=1)
+            next_btn      = gr.Button("Next Step ▶", variant="secondary", scale=1)
+            auto_play_btn = gr.Button("▶ Auto Play", variant="secondary", scale=1)
 
         btn_note_html = gr.HTML(value="")
 
@@ -978,7 +954,7 @@ def build_demo_tab() -> gr.Tab:
         def toggle_auto_play(current_active: bool):
             """Toggle auto-play and update button + spinner."""
             new_active = not current_active
-            new_label  = "Stop Auto Play" if new_active else "Auto Play"
+            new_label  = "⏹ Stop Auto Play" if new_active else "▶ Auto Play"
             thinking   = (
                 '<span class="thinking-spinner"></span>'
                 '<em style="color:#a78bfa;">Auto advancing…</em>'

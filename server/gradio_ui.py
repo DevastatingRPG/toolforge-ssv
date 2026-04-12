@@ -91,16 +91,8 @@ def build_app() -> gr.Blocks:
     """
     logger.info("Building ToolForge Gradio UI…")
 
-    # css= on gr.Blocks is deprecated in Gradio 6 and is NOT propagated when
-    # this child app is wrapped inside OpenEnv's root TabbedInterface at /web.
-    # Injecting a <style> tag via gr.HTML is the reliable path: the component
-    # renders into the live DOM in both standalone and mounted deployments.
+    # Gradio 6+ moved theme and css to launch() — keep Blocks minimal
     with gr.Blocks(title="ToolForge — Macro Tool Learning Benchmark") as app:
-
-        # Inject CUSTOM_CSS into the DOM so styles (spinner, winner-banner)
-        # apply whether running standalone or mounted under OpenEnv's
-        # TabbedInterface.  gr.HTML renders raw HTML directly into the page.
-        gr.HTML(f"<style>{CUSTOM_CSS}</style>")
 
         # -------------------------------------------------------------------
         # TOP-LEVEL HEADER
@@ -208,13 +200,13 @@ if __name__ == "__main__":
         server_name=GRADIO_HOST,
         server_port=GRADIO_PORT,
         share=GRADIO_SHARE,
-        # CSS is injected via gr.HTML(<style>) inside build_app() so it works
-        # in both standalone and mounted /web paths.  Theme still goes here.
+        # Gradio 6+: theme and css are passed here
         theme=gr.themes.Soft(
             primary_hue="violet",
             secondary_hue="indigo",
             neutral_hue="slate",
         ),
+        css=CUSTOM_CSS,
         # Enable the queue so streaming / long-running handlers work correctly
         # when Tab 2 (BYOA) real inference is wired in.
         # TODO: Tune max_size and concurrency_count after real backend is live.

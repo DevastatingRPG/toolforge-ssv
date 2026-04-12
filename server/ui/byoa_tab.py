@@ -34,23 +34,6 @@ from typing import Any, Dict, Generator, List, Optional, Tuple
 import gradio as gr
 import httpx
 
-# ---------------------------------------------------------------------------
-# Inline-style HTML helpers — no CSS class dependency, always visible even
-# when this child app is mounted inside OpenEnv's root TabbedInterface.
-# ---------------------------------------------------------------------------
-_DIVIDER = (
-    "<div style='border:none;border-top:3px solid #7c3aed;"
-    "margin:22px 0 18px;opacity:0.65;'></div>"
-)
-
-def _sec_hdr(text: str) -> str:
-    """Bold section title with purple left-bar accent."""
-    return (
-        f"<div style='border-left:4px solid #7c3aed;padding:5px 14px;"
-        f"margin:4px 0 14px;font-size:1.05em;font-weight:700;color:#e2e8f0;'>"
-        f"{text}</div>"
-    )
-
 from server.ui.shared import (
     ATOMIC_TOOLS,
     SYSTEM_PROMPT,
@@ -696,7 +679,7 @@ def build_byoa_tab() -> gr.Tab:
             and is scored by the same pipeline as the benchmark.
             """
         )
-        gr.HTML(_DIVIDER)
+        gr.HTML("<hr style='border-color:#374151;margin:8px 0;'>")
 
         # -------------------------------------------------------------------
         # CONNECTION MODE
@@ -709,7 +692,7 @@ def build_byoa_tab() -> gr.Tab:
 
         # --- API KEY SECTION ------------------------------------------------
         with gr.Group(visible=True) as api_key_section:
-            gr.HTML(_sec_hdr("API Key Connection"))
+            gr.Markdown("### API Key Connection")
             with gr.Row():
                 base_url_field = gr.Textbox(
                     value="https://api.openai.com/v1",
@@ -735,7 +718,7 @@ def build_byoa_tab() -> gr.Tab:
 
         # --- NGROK SECTION --------------------------------------------------
         with gr.Group(visible=False) as ngrok_section:
-            gr.HTML(_sec_hdr("Local Model via ngrok"))
+            gr.Markdown("### Local Model via ngrok")
             with gr.Row():
                 ngrok_url_field   = gr.Textbox(
                     value="",
@@ -804,12 +787,12 @@ def build_byoa_tab() -> gr.Tab:
                 )
                 local_server_file = gr.File(label="", visible=False)
 
-        gr.HTML(_DIVIDER)
+        gr.HTML("<hr style='border-color:#374151;margin:8px 0;'>")
 
         # -------------------------------------------------------------------
         # ENV URL + SYSTEM PROMPT
         # -------------------------------------------------------------------
-        gr.HTML(_sec_hdr("Settings"))
+        gr.Markdown("### Settings")
         env_url_field = gr.Textbox(
             value=DEFAULT_ENV_URL,
             label="ToolForge Env URL",
@@ -821,45 +804,45 @@ def build_byoa_tab() -> gr.Tab:
             lines=10,
         )
 
-        gr.HTML(_DIVIDER)
+        gr.HTML("<hr style='border-color:#374151;margin:8px 0;'>")
 
         # -------------------------------------------------------------------
         # RUN CONTROLS ROW
         # -------------------------------------------------------------------
         with gr.Row():
-            run_btn        = gr.Button("Run Agent",      variant="primary",   scale=2)
-            next_ep_btn    = gr.Button("Next Episode",   variant="secondary", scale=2, interactive=False)
-            pause_btn      = gr.Button("Pause",          variant="secondary", scale=1)
-            autoplay_btn   = gr.Button("Autoplay: OFF",  variant="secondary", scale=1)
+            run_btn        = gr.Button("▶ Run Agent",     variant="primary",   scale=2)
+            next_ep_btn    = gr.Button("▶ Next Episode",  variant="secondary", scale=2, interactive=False)
+            pause_btn      = gr.Button("⏸ Pause",         variant="secondary", scale=1)
+            autoplay_btn   = gr.Button("🔄 Autoplay: OFF", variant="secondary", scale=1)
 
         run_status_html = gr.HTML(value="")
 
-        gr.HTML(_DIVIDER)
+        gr.HTML("<hr style='border-color:#374151;margin:8px 0;'>")
 
         # -------------------------------------------------------------------
         # RESULTS AREA
         # -------------------------------------------------------------------
-        gr.HTML(_sec_hdr("Episode Results"))
+        gr.Markdown("### Episode Results")
         episode_table_html = gr.HTML(value=_render_episode_table([]))
 
-        gr.HTML(_DIVIDER)
+        gr.HTML("<hr style='border-color:#374151;margin:8px 0;'>")
 
-        gr.HTML(_sec_hdr("Macro Library"))
+        gr.Markdown("### Macro Library")
         byoa_macro_html = gr.HTML(value=render_macro_library_html([]))
 
-        gr.HTML(_DIVIDER)
+        gr.HTML("<hr style='border-color:#374151;margin:8px 0;'>")
 
         # -------------------------------------------------------------------
         # TRAINING DATA
         # -------------------------------------------------------------------
-        gr.HTML(_sec_hdr("Training Data Export"))
+        gr.Markdown("### Training Data Export")
         gr.Markdown(
             "Live JSON log of every step — ready for fine-tuning or analysis. "
             "Shows the last 10 records. Download to get all records."
         )
         training_json_html = gr.HTML(value=_json_block([]))
         with gr.Row():
-            download_training_btn  = gr.Button("Download Training Data", variant="secondary", scale=1)
+            download_training_btn  = gr.Button("⬇ Download Training Data JSON", variant="secondary", scale=1)
             training_download_file = gr.File(label="", visible=False, scale=2)
 
         # -------------------------------------------------------------------
@@ -981,7 +964,7 @@ def build_byoa_tab() -> gr.Tab:
         # Autoplay toggle (visual only — actual loop left to user clicking)
         def toggle_autoplay(active: bool):
             new_active = not active
-            label = "Autoplay: ON" if new_active else "Autoplay: OFF"
+            label = "🔄 Autoplay: ON" if new_active else "🔄 Autoplay: OFF"
             return gr.update(value=label), new_active
 
         autoplay_btn.click(
