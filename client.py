@@ -29,17 +29,31 @@ class ToolforgeEnv(
         >>> # Connect to a running server
         >>> with ToolforgeEnv(base_url="http://localhost:8000") as client:
         ...     result = client.reset()
-        ...     print(result.observation.echoed_message)
+        ...     print(result.observation.current_task.prompt)
         ...
-        ...     result = client.step(ToolForgeAction(message="Hello!"))
-        ...     print(result.observation.echoed_message)
+        ...     result = client.step(ToolForgeAction(
+                    action_type="propose_plan",
+                    plan=[
+                        ToolCall(tool_name="deploy"),
+                        ToolCall(tool_name="healthcheck"),
+                        ToolCall(tool_name="notify")
+                    ]
+                ))
+        ...     print(result.observation.current_task.prompt)
 
     Example with Docker:
         >>> # Automatically start container and connect
         >>> client = ToolforgeEnv.from_docker_image("toolforge_env-env:latest")
         >>> try:
         ...     result = client.reset()
-        ...     result = client.step(ToolForgeAction(message="Test"))
+        ...     result = client.step(ToolForgeAction(
+                    action_type="propose_plan",
+                    plan=[
+                        ToolCall(tool_name="deploy"),
+                        ToolCall(tool_name="healthcheck"),
+                        ToolCall(tool_name="notify")
+                    ]
+                ))
         ... finally:
         ...     client.close()
     """
