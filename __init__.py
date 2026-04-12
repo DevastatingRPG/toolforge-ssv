@@ -6,8 +6,8 @@
 
 """Toolforge Env Environment."""
 
-from .client import ToolforgeEnv
-from .models import ToolForgeAction, ToolForgeObservation
+from client import ToolforgeEnv
+from models import ToolForgeAction, ToolForgeObservation
 
 __all__ = [
     "ToolForgeAction",

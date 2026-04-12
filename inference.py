@@ -48,9 +48,10 @@ import textwrap
 from typing import List, Optional, Dict, Any
 import time
 
+import graders
 from openai import OpenAI
 
-from toolforge_env import ToolforgeEnv, graders
+from client import ToolforgeEnv
 from models import ToolCall, Tool, ToolForgeAction
 IMAGE_NAME = os.getenv("IMAGE_NAME", "openenv-toolforge") # If you are using docker image 
 API_KEY = os.getenv("HF_TOKEN") or os.getenv("API_KEY")
