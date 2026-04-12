@@ -9,33 +9,30 @@ Tab 2 — Bring Your Own Agent (BYOA)
 ====================================
 
 Lets users connect their own LLM and run it against the real ToolForge
-environment.  Supports two connection modes:
+environment using a real inference loop that mirrors inference.py.
 
-    1. API Key (OpenAI-compatible)  — user supplies a base URL + API key.
-    2. Local Model via ngrok        — user supplies an ngrok tunnel URL.
+Connection modes:
+    1. API Key (OpenAI-compatible) — base_url + model_name + api_key
+    2. Local Model via ngrok       — ngrok_url + model_name
 
-The agent system prompt is pre-filled from shared.SYSTEM_PROMPT but is
-fully editable.  A warning is shown that the JSON response format must
-not be changed (it would break the server-side parser).
+Results:
+    - Episode-by-episode table (Episode | Task Summary | Plan | Reward | Turns | Macro?)
+    - Live training data JSON block + real tempfile download
+    - Macro library display
 
-Results layout mirrors the Demo Mode right column:
-    - Agent Plan HTML
-    - Reward display
-    - LLM Turns Used / Turns Saved
-    - Macro Library
-    - Download Results JSON button (placeholder)
-
-TODO: Wire the Run button to the real ToolforgeEnv client (inference.py
-      logic).  The current handler returns placeholder results.
-TODO: Implement the "Download Results JSON" button to serialise the run
-      log and trigger a Gradio file download.
+Import pattern (runs from toolforge_env/ dir):
+    from ui.byoa_tab import build_byoa_tab
 """
 
 import json
 import logging
-from typing import Any, Dict, List, Optional, Tuple
+import os
+import tempfile
+import textwrap
+from typing import Any, Dict, Generator, List, Optional, Tuple
 
 import gradio as gr
+import httpx
 
 from ui.shared import (
     ATOMIC_TOOLS,
@@ -45,266 +42,584 @@ from ui.shared import (
     render_reward_html,
     render_tools_html,
 )
+from ui.env_client import (
+    DEFAULT_ENV_URL,
+    env_reset,
+    env_step,
+    extract_macros,
+    parse_task_from_obs,
+    parse_tools_from_obs,
+    parse_total_tasks_from_obs,
+)
 
 # ---------------------------------------------------------------------------
-# Module-level logger
+# Module-level logger — NEVER log api_key values
 # ---------------------------------------------------------------------------
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Difficulty options (all three levels are available in BYOA mode)
+# Inference constants (mirrors inference.py)
 # ---------------------------------------------------------------------------
-DIFFICULTY_OPTIONS: List[str] = ["Easy", "Medium", "Hard"]
-
-# Provider presets — defines the default base URL per provider
-PROVIDER_PRESETS: Dict[str, str] = {
-    "OpenAI":    "https://api.openai.com/v1",
-    "Anthropic": "https://api.anthropic.com/v1",
-    "Other":     "",
-}
-
-# Default model name placeholder shown in the model field
-DEFAULT_MODEL_NAME: str = "gpt-4o"
-
-# Placeholder ngrok URL hint
-NGROK_URL_PLACEHOLDER: str = "https://xxxx-xx-xx-xxx.ngrok-free.app/v1"
+MAX_STEPS_PER_EPISODE: int = 20   # max LLM turns before force-advancing
+TEMPERATURE: float = 0.0
+MAX_TOKENS: int = 500
+TASK_ID: str = "easy"             # BYOA always runs easy (matches demo mode)
 
 
 # ===========================================================================
-# EVENT HANDLERS
+# SECTION 1: CONNECTION HELPERS
 # ===========================================================================
 
-def on_provider_change(provider: str) -> str:
+def _make_openai_client(mode: str, base_url: str, api_key: str, ngrok_url: str):
     """
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    on_provider_change
+    _make_openai_client
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    Pre-fill the Base URL field when the user selects a known provider.
+    Instantiate an openai.OpenAI client from the current connection settings.
 
     Args:
-        provider : Selected provider name ("OpenAI", "Anthropic", "Other").
+        mode     : "API Key (OpenAI-compatible)" or "Local Model via ngrok"
+        base_url : API endpoint (API key mode)
+        api_key  : User API key (API key mode) — NEVER logged
+        ngrok_url: ngrok tunnel URL (ngrok mode)
 
     Returns:
-        The preset base URL string for that provider.
+        openai.OpenAI client instance
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     """
-    return PROVIDER_PRESETS.get(provider, "")
+    try:
+        from openai import OpenAI
+    except ImportError:
+        raise RuntimeError("openai package not installed. Run: pip install openai")
+
+    if mode == "Local Model via ngrok":
+        url = ngrok_url.rstrip("/")
+        return OpenAI(base_url=url, api_key="local")
+    else:
+        url = base_url.rstrip("/") or "https://api.openai.com/v1"
+        return OpenAI(base_url=url, api_key=api_key)
 
 
-def on_mode_change(mode: str) -> Tuple[bool, bool]:
-    """
-    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    on_mode_change
-    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    Show or hide the API key section vs the ngrok section depending on
-    which connection mode the user selected.
-
-    Args:
-        mode : "API Key (OpenAI-compatible)" or "Local Model via ngrok".
-
-    Returns:
-        Tuple (api_key_visible, ngrok_visible) as gr.update dicts.
-    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    """
-    is_api_mode   = (mode == "API Key (OpenAI-compatible)")
-    is_ngrok_mode = not is_api_mode
-    return gr.update(visible=is_api_mode), gr.update(visible=is_ngrok_mode)
+def on_mode_change(mode: str) -> Tuple:
+    """Show/hide API key section vs ngrok section."""
+    is_api = mode == "API Key (OpenAI-compatible)"
+    return gr.update(visible=is_api), gr.update(visible=not is_api)
 
 
-def on_test_connection_api(
-    provider: str,
-    base_url: str,
-    model_name: str,
-    api_key: str,
-) -> str:
+def on_test_connection_api(base_url: str, model_name: str, api_key: str) -> str:
     """
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     on_test_connection_api
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    Placeholder connection test for API key mode.
+    Test an API key connection by calling GET /models (lightweight probe).
+    Falls back to a minimal completion if models endpoint is unavailable.
 
-    TODO: Perform a real lightweight LLM call (e.g., list models or a
-          minimal completion) to verify credentials before the full run.
-
-    Args:
-        provider   : Selected provider name.
-        base_url   : API base URL.
-        model_name : Model identifier string.
-        api_key    : User's API key (not stored or logged).
-
-    Returns:
-        Status message HTML string.
+    Returns HTML status string.
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     """
-    logger.info("Connection test requested | provider=%s model=%s", provider, model_name)
-
-    # TODO: Replace with a real openai.OpenAI(base_url=base_url, api_key=api_key)
-    #       test call.  For now we return a success placeholder.
     if not api_key.strip():
-        return (
-            '<div style="color:#f87171;padding:8px;border-radius:6px;background:#450a0a;">'
-            '❌ API key is empty. Please enter your key.</div>'
-        )
+        return _status_html("❌ API key is empty.", error=True)
     if not base_url.strip():
-        return (
-            '<div style="color:#f87171;padding:8px;border-radius:6px;background:#450a0a;">'
-            '❌ Base URL is empty. Please enter the API endpoint.</div>'
-        )
+        return _status_html("❌ Base URL is empty.", error=True)
+    if not model_name.strip():
+        return _status_html("❌ Model name is empty.", error=True)
 
-    return (
-        '<div style="color:#4ade80;padding:8px;border-radius:6px;background:#052e16;">'
-        f'✅ Connection to <strong>{provider}</strong> ({model_name}) looks valid. '
-        'Ready to run.</div>'
-    )
+    try:
+        client = _make_openai_client("API Key (OpenAI-compatible)", base_url, api_key, "")
+        # Try listing models as a lightweight test
+        try:
+            client.models.list()
+            return _status_html(f"✅ Connected to {base_url} — model list OK. Ready to run.")
+        except Exception:
+            # Fall back: minimal 1-token completion
+            client.chat.completions.create(
+                model=model_name,
+                messages=[{"role": "user", "content": "hi"}],
+                max_tokens=1,
+                temperature=0.0,
+            )
+            return _status_html(f"✅ Connected ({model_name}) — completion test passed.")
+    except Exception as exc:
+        return _status_html(f"❌ Connection failed: {exc}", error=True)
 
 
-def on_test_connection_ngrok(ngrok_url: str) -> str:
+def on_test_connection_ngrok(ngrok_url: str, model_name: str) -> str:
     """
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     on_test_connection_ngrok
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    Placeholder connection test for the ngrok / local model mode.
+    Ping the ngrok URL (GET /v1/models) and verify a 200 response.
 
-    TODO: Actually ping the ngrok URL (e.g., GET /v1/models) and verify
-          a 200 response before allowing the user to start a run.
-
-    Args:
-        ngrok_url : The ngrok tunnel URL for the local model server.
-
-    Returns:
-        Status message HTML string.
+    Returns HTML status string.
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     """
-    logger.info("ngrok connection test requested | url=%s", ngrok_url)
-
     if not ngrok_url.strip():
+        return _status_html("❌ ngrok URL is empty.", error=True)
+    if not model_name.strip():
+        return _status_html("❌ Model name is empty.", error=True)
+
+    probe_url = ngrok_url.rstrip("/") + "/models"
+    try:
+        resp = httpx.get(probe_url, timeout=8.0)
+        if resp.status_code == 200:
+            return _status_html(f"✅ ngrok server reachable at {ngrok_url} — models endpoint OK.")
+        else:
+            return _status_html(
+                f"⚠️ Server responded HTTP {resp.status_code}. It may still work — proceed with caution.",
+                warn=True,
+            )
+    except Exception as exc:
+        return _status_html(f"❌ Cannot reach {ngrok_url}: {exc}", error=True)
+
+
+def _status_html(msg: str, error: bool = False, warn: bool = False) -> str:
+    """Return a coloured status <div> string."""
+    if error:
+        bg, fg = "#450a0a", "#f87171"
+    elif warn:
+        bg, fg = "#451a03", "#fbbf24"
+    else:
+        bg, fg = "#052e16", "#4ade80"
+    return f'<div style="color:{fg};padding:8px;border-radius:6px;background:{bg};">{msg}</div>'
+
+
+# ===========================================================================
+# SECTION 2: INFERENCE HELPERS (mirrors inference.py logic)
+# ===========================================================================
+
+def _build_user_prompt(
+    step: int,
+    task_prompt: str,
+    available_tools: List[Dict[str, Any]],
+    last_reward: float,
+    history: List[str],
+) -> str:
+    """Build the per-step user prompt (mirrors inference.py build_user_prompt)."""
+    from models import ToolForgeAction, ToolCall, Tool  # type: ignore
+    history_block = "\n".join(history[-4:]) if history else "None"
+    return textwrap.dedent(
+        f"""
+        Step: {step}
+        Current task: {task_prompt!r}
+        Available tools: {json.dumps(available_tools)}
+        Last reward: {last_reward:.2f}
+        Previous steps:
+        {history_block}
+
+        Return a ToolForgeAction whose `plan` uses only currently available tools.
+        """
+    ).strip()
+
+
+def _get_model_action(
+    client,
+    model_name: str,
+    step: int,
+    task_prompt: str,
+    available_tools: List[Dict[str, Any]],
+    last_reward: float,
+    history: List[str],
+) -> Any:
+    """
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    _get_model_action
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    Call the LLM and parse the response into a ToolForgeAction.
+    Returns (action, raw_text, error_str).
+    On parse failure, returns a single-tool fallback action.
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    """
+    from models import ToolForgeAction, ToolCall, Tool  # type: ignore
+
+    user_prompt = _build_user_prompt(step, task_prompt, available_tools, last_reward, history)
+    system = (
+        SYSTEM_PROMPT
+        + "\nRespond ONLY with valid JSON matching the ToolForgeAction schema. "
+        + "No markdown, no explanation."
+    )
+    schema_suffix = (
+        f"\n\nSchema:\n{json.dumps(ToolForgeAction.model_json_schema(), indent=2)}"
+        f"\n\nToolCallSchema:\n{json.dumps(ToolCall.model_json_schema(), indent=2)}"
+    )
+    try:
+        completion = client.chat.completions.create(
+            model=model_name,
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user",   "content": user_prompt + schema_suffix},
+            ],
+            temperature=TEMPERATURE,
+            max_tokens=MAX_TOKENS,
+        )
+        raw = (completion.choices[0].message.content or "").strip()
+        raw = raw.replace("```json", "").replace("```", "").strip()
+        action = ToolForgeAction(**json.loads(raw))
+        return action, raw, None
+    except Exception as exc:
+        fallback_tool = available_tools[0]["name"] if available_tools else "deploy"
+        action = ToolForgeAction(
+            action_type="propose_plan",
+            plan=[ToolCall(tool_name=fallback_tool)],
+            macro_proposal=None,
+        )
+        return action, None, str(exc)
+
+
+# ===========================================================================
+# SECTION 3: EPISODE TABLE RENDERING
+# ===========================================================================
+
+def _render_episode_table(rows: List[Dict[str, Any]]) -> str:
+    """
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    _render_episode_table
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    Render the episode-by-episode results table as HTML.
+
+    Each row dict has keys:
+        episode     int
+        task        str   — truncated task prompt
+        plan        str   — "tool1, tool2, ..." (comma-joined)
+        reward      float
+        turns       int
+        macro       str   — macro name or "—"
+
+    Returns HTML table string.
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    """
+    if not rows:
         return (
-            '<div style="color:#f87171;padding:8px;border-radius:6px;background:#450a0a;">'
-            '❌ ngrok URL is empty.</div>'
+            '<div style="padding:16px;color:#9ca3af;font-style:italic;text-align:center;">'
+            "No episodes completed yet."
+            "</div>"
         )
 
-    return (
-        '<div style="color:#4ade80;padding:8px;border-radius:6px;background:#052e16;">'
-        f'✅ Placeholder success — ngrok URL accepted. '
-        'TODO: Add real connectivity ping.</div>'
+    header = (
+        "<table style='width:100%;border-collapse:collapse;font-size:0.83em;'>"
+        "<thead><tr style='background:#1f2937;color:#9ca3af;text-align:left;'>"
+        "<th style='padding:6px 10px;'>Ep</th>"
+        "<th style='padding:6px 10px;'>Task</th>"
+        "<th style='padding:6px 10px;'>Plan</th>"
+        "<th style='padding:6px 10px;'>Reward</th>"
+        "<th style='padding:6px 10px;'>Turns</th>"
+        "<th style='padding:6px 10px;'>Macro?</th>"
+        "</tr></thead><tbody>"
     )
 
+    body = ""
+    total_reward = 0.0
+    total_turns = 0
+    for i, row in enumerate(rows):
+        bg = "#111827" if i % 2 == 0 else "#1a2332"
+        reward = row.get("reward", 0.0)
+        total_reward += reward
+        total_turns += row.get("turns", 0)
+        reward_colour = "#22c55e" if reward >= 0.75 else ("#f59e0b" if reward >= 0.5 else ("#f97316" if reward >= 0 else "#ef4444"))
+        task_text = str(row.get("task", ""))[:60] + ("…" if len(str(row.get("task", ""))) > 60 else "")
+        body += (
+            f"<tr style='background:{bg};color:#d1d5db;'>"
+            f"<td style='padding:6px 10px;font-weight:600;'>{row.get('episode', i+1)}</td>"
+            f"<td style='padding:6px 10px;'>{task_text}</td>"
+            f"<td style='padding:6px 10px;font-family:monospace;color:#a5b4fc;'>{row.get('plan','')}</td>"
+            f"<td style='padding:6px 10px;font-weight:700;color:{reward_colour};'>{reward:+.2f}</td>"
+            f"<td style='padding:6px 10px;'>{row.get('turns', 0)}</td>"
+            f"<td style='padding:6px 10px;color:#c4b5fd;'>{row.get('macro', '—')}</td>"
+            f"</tr>"
+        )
 
-def on_run_byoa(
+    n = len(rows)
+    avg_reward = total_reward / n if n else 0.0
+    footer = (
+        f"<tr style='background:#374151;color:#e5e7eb;font-weight:700;border-top:2px solid #4b5563;'>"
+        f"<td style='padding:6px 10px;' colspan='3'>Totals ({n} ep)</td>"
+        f"<td style='padding:6px 10px;'>avg {avg_reward:+.2f}</td>"
+        f"<td style='padding:6px 10px;'>{total_turns}</td>"
+        f"<td style='padding:6px 10px;'></td>"
+        f"</tr>"
+    )
+    return header + body + footer + "</tbody></table>"
+
+
+# ===========================================================================
+# SECTION 4: MAIN INFERENCE LOOP (generator — yields UI updates per step)
+# ===========================================================================
+
+def run_agent_episode(
     mode: str,
-    # API key mode fields
-    provider: str,
     base_url: str,
     model_name: str,
     api_key: str,
-    # ngrok mode fields
     ngrok_url: str,
-    # Common fields
-    difficulty: str,
-    system_prompt: str,
-) -> Tuple:
+    env_url: str,
+    # State inputs
+    episode_rows_state: List[Dict[str, Any]],
+    training_data_state: List[Dict[str, Any]],
+    episode_number_state: int,
+) -> Generator:
     """
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    on_run_byoa
+    run_agent_episode
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    Entry point for running the user's agent against the ToolForge env.
+    Generator that runs one full episode and yields UI updates after each step.
 
-    TODO: This function should:
-        1. Instantiate an openai.OpenAI client from the supplied credentials.
-        2. Connect to the ToolForge environment server (local or HF Space).
-        3. Run the inference loop (mirroring inference.py) for the chosen
-           difficulty task group.
-        4. Stream intermediate results back to the UI via a generator
-           (use `yield` for streaming updates).
-        5. Call the EpisodeGrader at the end to compute the final score.
-
-    For now, returns static placeholder data after a fake "run" notice.
+    Yields a tuple matching the outputs list defined in build_byoa_tab():
+        (status_html, table_html, training_json, macro_html,
+         episode_rows_state, training_data_state, episode_number_state)
 
     Args:
-        mode         : Connection mode string.
-        provider     : LLM provider (API key mode).
-        base_url     : API endpoint (API key mode).
-        model_name   : Model identifier (API key mode).
-        api_key      : User's API key (API key mode) — NEVER log this.
-        ngrok_url    : ngrok tunnel URL (local mode).
-        difficulty   : Difficulty level string.
-        system_prompt: Editable system prompt for the agent.
-
-    Returns:
-        Tuple of display values for the results area + a run log JSON string.
+        mode                 : Connection mode radio value
+        base_url             : API base URL (API key mode)
+        model_name           : LLM model identifier (both modes)
+        api_key              : API key (API key mode) — NEVER logged
+        ngrok_url            : ngrok tunnel URL (ngrok mode)
+        env_url              : ToolForge env server URL
+        episode_rows_state   : Accumulated episode row dicts (across episodes)
+        training_data_state  : Accumulated training data records
+        episode_number_state : Current episode number (1-based)
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     """
-    logger.info(
-        "BYOA run requested | mode=%s difficulty=%s model=%s",
-        mode, difficulty, model_name if mode == "API Key (OpenAI-compatible)" else "local",
+    # --- Input validation --------------------------------------------------
+    if not model_name.strip():
+        yield (
+            _status_html("❌ Model name is required.", error=True),
+            _render_episode_table(episode_rows_state),
+            _json_block(training_data_state),
+            render_macro_library_html([]),
+            episode_rows_state, training_data_state, episode_number_state,
+        )
+        return
+
+    effective_base = ngrok_url if mode == "Local Model via ngrok" else base_url
+    if not effective_base.strip():
+        yield (
+            _status_html("❌ URL is required.", error=True),
+            _render_episode_table(episode_rows_state),
+            _json_block(training_data_state),
+            render_macro_library_html([]),
+            episode_rows_state, training_data_state, episode_number_state,
+        )
+        return
+
+    # --- Build client -------------------------------------------------------
+    try:
+        client = _make_openai_client(mode, base_url, api_key, ngrok_url)
+    except Exception as exc:
+        yield (
+            _status_html(f"❌ Could not create LLM client: {exc}", error=True),
+            _render_episode_table(episode_rows_state),
+            _json_block(training_data_state),
+            render_macro_library_html([]),
+            episode_rows_state, training_data_state, episode_number_state,
+        )
+        return
+
+    ep_num = episode_number_state
+    yield (
+        _status_html(f"⏳ Starting episode {ep_num} — resetting environment…", warn=True),
+        _render_episode_table(episode_rows_state),
+        _json_block(training_data_state),
+        render_macro_library_html([]),
+        episode_rows_state, training_data_state, episode_number_state,
     )
 
-    # ------------------------------------------------------------------
-    # TODO: Replace everything below with a real inference run.
-    # The placeholder simulates one successful step so the UI is visually
-    # complete even without a live backend.
-    # ------------------------------------------------------------------
+    # --- Reset environment --------------------------------------------------
+    result, err = env_reset(env_url, TASK_ID)
+    if err or result is None:
+        yield (
+            _status_html(f"❌ env_reset failed: {err}", error=True),
+            _render_episode_table(episode_rows_state),
+            _json_block(training_data_state),
+            render_macro_library_html([]),
+            episode_rows_state, training_data_state, episode_number_state,
+        )
+        return
 
-    # Placeholder plan
-    placeholder_plan     = ["deploy", "healthcheck", "notify"]
-    placeholder_macros   = []                # No macros created in placeholder run
-    placeholder_reward   = 0.65
-    placeholder_baseline = 3
+    total_tasks = parse_total_tasks_from_obs(result)
+    history: List[str] = []
+    last_reward = 0.0
+    macros: List[Dict[str, Any]] = []
+    episode_reward_sum = 0.0
+    episode_turns = 0
+    macro_created_name: Optional[str] = None
+    done = False
+    task_step_idx = 0
 
-    plan_html    = render_plan_html(placeholder_plan, placeholder_macros)
-    reward_html  = render_reward_html(placeholder_reward)
-    turns_used   = len(placeholder_plan)
-    turns_saved  = max(0, placeholder_baseline - turns_used)
-    macro_html   = render_macro_library_html(placeholder_macros)
+    # --- Step loop ----------------------------------------------------------
+    for step in range(1, MAX_STEPS_PER_EPISODE + 1):
+        if done:
+            break
 
-    # Placeholder run log for the download button
-    run_log = {
-        "status":     "placeholder",
-        "difficulty": difficulty,
-        "note":       "TODO: Replace with real inference run output.",
-        "plan":       placeholder_plan,
-        "reward":     placeholder_reward,
-        "macros":     placeholder_macros,
+        task_info  = parse_task_from_obs(result)
+        tools_list = parse_tools_from_obs(result)
+        macros     = extract_macros(tools_list)
+
+        task_prompt   = task_info.get("prompt", "")
+        task_id_str   = task_info.get("id", "unknown")
+        tools_for_llm = [{"name": t.get("name", ""), "description": t.get("description", "")} for t in tools_list]
+
+        yield (
+            _status_html(
+                f"⏳ Episode {ep_num} | Task {task_step_idx+1}/{total_tasks or '?'} | "
+                f"Step {step} — asking {model_name}…",
+                warn=True,
+            ),
+            _render_episode_table(episode_rows_state),
+            _json_block(training_data_state),
+            render_macro_library_html(macros),
+            episode_rows_state, training_data_state, episode_number_state,
+        )
+
+        # LLM call
+        action, raw_text, llm_err = _get_model_action(
+            client, model_name, step,
+            task_prompt, tools_for_llm, last_reward, history,
+        )
+
+        if llm_err and raw_text is None:
+            # Hard LLM failure — stop this episode
+            yield (
+                _status_html(f"❌ LLM call failed: {llm_err}", error=True),
+                _render_episode_table(episode_rows_state),
+                _json_block(training_data_state),
+                render_macro_library_html(macros),
+                episode_rows_state, training_data_state, episode_number_state,
+            )
+            return
+
+        plan_names = [tc.tool_name for tc in action.plan]
+        mp = action.macro_proposal
+        if mp and mp.name:
+            macro_created_name = mp.name
+
+        # Build macro_proposal in the format env_step expects: {"name": str, "steps": List[str]}
+        mp_dict: Optional[Dict[str, Any]] = None
+        if mp and mp.name and mp.steps:
+            mp_dict = {
+                "name":  mp.name,
+                "steps": [tc.tool_name for tc in mp.steps],
+            }
+
+        # env_step
+        step_result, step_err = env_step(env_url, plan_names, macro_proposal=mp_dict)
+        if step_err or step_result is None:
+            yield (
+                _status_html(f"❌ env_step failed: {step_err}", error=True),
+                _render_episode_table(episode_rows_state),
+                _json_block(training_data_state),
+                render_macro_library_html(macros),
+                episode_rows_state, training_data_state, episode_number_state,
+            )
+            return
+
+        reward = float(step_result.get("reward", 0.0))
+        done   = bool(step_result.get("done", False))
+        meta   = step_result.get("observation", {}).get("metadata", {}) or {}
+
+        episode_reward_sum += reward
+        episode_turns      += 1
+        last_reward         = reward
+        task_step_idx      += 1
+
+        history.append(
+            f"{action.model_dump_json()}|Step {step}|reward {reward:+.2f}|task_id {task_id_str}"
+        )
+
+        # Build training record for this step
+        training_record = {
+            "episode":           ep_num,
+            "task":              task_prompt,
+            "plan":              plan_names,
+            "macro_proposed":    mp.model_dump() if mp else None,
+            "reward":            reward,
+            "turns_used":        step,
+            "turns_saved":       max(0, task_info.get("baseline_call_count", len(plan_names)) - len(plan_names)),
+            "slots_filled":      [],    # populated from metadata when available
+            "slots_missing":     [],
+            "validation_passed": bool(meta.get("task_complete", reward > 0)),
+        }
+        training_data_state = list(training_data_state) + [training_record]
+
+        # Update the result for next iteration
+        result = step_result
+
+        # Check UI-side episode completion
+        ui_ep_done = done or (total_tasks > 0 and task_step_idx >= total_tasks)
+        if ui_ep_done:
+            break
+
+    # --- Episode complete — add summary row ---------------------------------
+    row: Dict[str, Any] = {
+        "episode": ep_num,
+        "task":    task_prompt,
+        "plan":    ", ".join(plan_names) if plan_names else "—",
+        "reward":  episode_reward_sum / max(episode_turns, 1),
+        "turns":   episode_turns,
+        "macro":   macro_created_name or "—",
     }
-    run_log_str = json.dumps(run_log, indent=2)
+    new_rows = list(episode_rows_state) + [row]
+    new_ep_num = ep_num + 1
 
-    return (
-        gr.update(visible=True),   # Make results area visible
-        plan_html,
-        reward_html,
-        turns_used,
-        turns_saved,
-        macro_html,
-        run_log_str,               # Raw JSON for download button
+    yield (
+        _status_html(
+            f"✅ Episode {ep_num} complete — {episode_turns} turns, "
+            f"avg reward {episode_reward_sum/max(episode_turns,1):+.2f}. "
+            f"Click 'Next Episode' to continue."
+        ),
+        _render_episode_table(new_rows),
+        _json_block(training_data_state),
+        render_macro_library_html(macros),
+        new_rows, training_data_state, new_ep_num,
     )
 
 
-def on_download_results(run_log_json: str):
-    """
-    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    on_download_results
-    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    Placeholder for the Download Results JSON button.
-
-    TODO: Write run_log_json to a temp file and return it as a
-          gr.File component so Gradio triggers a browser download.
-
-    Args:
-        run_log_json : JSON string of the run log.
-
-    Returns:
-        Status message string (placeholder).
-    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    """
-    # TODO: implement file download
+def _json_block(data: List[Dict[str, Any]]) -> str:
+    """Render training data list as a preformatted JSON block."""
+    if not data:
+        return '<pre style="color:#9ca3af;font-size:0.8em;">No training data yet.</pre>'
     return (
-        '<div style="color:#fbbf24;padding:8px;border-radius:6px;background:#451a03;">'
-        '⚠️ Download not yet implemented. TODO: Write to temp file and return gr.File.</div>'
+        '<pre style="background:#111827;color:#a5b4fc;padding:12px;border-radius:8px;'
+        'font-size:0.78em;overflow:auto;max-height:300px;">'
+        + json.dumps(data[-10:], indent=2)   # show last 10 records
+        + f'\n... ({len(data)} total records)</pre>'
     )
 
 
 # ===========================================================================
-# TAB BUILDER
+# SECTION 5: DOWNLOAD HANDLER
+# ===========================================================================
+
+def on_download_training_data(training_data_state: List[Dict[str, Any]]):
+    """
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    on_download_training_data
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    Write training data to a real temp file and return it for Gradio download.
+
+    Args:
+        training_data_state : List of training record dicts.
+
+    Returns:
+        File path string (Gradio gr.File picks this up).
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    """
+    if not training_data_state:
+        return None
+
+    tmp = tempfile.NamedTemporaryFile(
+        mode="w",
+        suffix=".json",
+        prefix="toolforge_training_",
+        delete=False,
+        encoding="utf-8",
+    )
+    json.dump(training_data_state, tmp, indent=2)
+    tmp.close()
+    logger.info("Training data written to %s (%d records)", tmp.name, len(training_data_state))
+    return tmp.name
+
+
+# ===========================================================================
+# SECTION 6: TAB BUILDER
 # ===========================================================================
 
 def build_byoa_tab() -> gr.Tab:
@@ -313,9 +628,6 @@ def build_byoa_tab() -> gr.Tab:
     build_byoa_tab
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     Construct and return the "Bring Your Own Agent" gr.Tab component.
-
-    Returns:
-        A configured gr.Tab component.
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     """
     with gr.Tab("🔌 Bring Your Own Agent") as tab:
@@ -326,17 +638,15 @@ def build_byoa_tab() -> gr.Tab:
         gr.Markdown(
             """
             # Bring Your Own Agent
-
             Connect your own LLM and run it against the **real ToolForge environment**.
-            Your agent will receive actual task prompts, propose plans, earn rewards,
-            and can create macro tools — all scored by the same pipeline as the benchmark.
+            Your agent receives actual task prompts, proposes plans, earns rewards,
+            and is scored by the same pipeline as the benchmark.
             """
         )
-
         gr.HTML("<hr style='border-color:#374151;margin:8px 0;'>")
 
         # -------------------------------------------------------------------
-        # CONNECTION MODE RADIO
+        # CONNECTION MODE
         # -------------------------------------------------------------------
         connection_mode = gr.Radio(
             choices=["API Key (OpenAI-compatible)", "Local Model via ngrok"],
@@ -344,141 +654,168 @@ def build_byoa_tab() -> gr.Tab:
             label="Connection Mode",
         )
 
-        # -------------------------------------------------------------------
-        # API KEY SECTION (visible by default)
-        # -------------------------------------------------------------------
+        # --- API KEY SECTION ------------------------------------------------
         with gr.Group(visible=True) as api_key_section:
             gr.Markdown("### API Key Connection")
-
             with gr.Row():
-                provider_dropdown = gr.Dropdown(
-                    choices=list(PROVIDER_PRESETS.keys()),
-                    value="OpenAI",
-                    label="Provider",
-                    scale=1,
-                )
                 base_url_field = gr.Textbox(
-                    value=PROVIDER_PRESETS["OpenAI"],   # pre-filled for OpenAI
+                    value="https://api.openai.com/v1",
                     label="Base URL",
                     placeholder="https://api.openai.com/v1",
                     scale=3,
                 )
-
-            with gr.Row():
-                model_name_field = gr.Textbox(
-                    value=DEFAULT_MODEL_NAME,
+                api_model_field = gr.Textbox(
+                    value="",
                     label="Model Name",
-                    placeholder="gpt-4o",
+                    placeholder="e.g. gpt-4o, mistral-small, claude-3-5-sonnet",
                     scale=2,
                 )
-                api_key_field = gr.Textbox(
-                    value="",
-                    label="API Key  (used only in your session — never stored)",
-                    placeholder="sk-...",
-                    type="password",        # masks the key in the UI
-                    scale=3,
-                )
+            api_key_field = gr.Textbox(
+                value="",
+                label="API Key  (used only in your session — never stored or logged)",
+                placeholder="sk-...",
+                type="password",
+            )
+            with gr.Row():
+                test_api_btn   = gr.Button("Test Connection", variant="secondary", scale=1)
+                api_status_html = gr.HTML(value="", scale=3)
 
-            test_api_btn = gr.Button("Test Connection", variant="secondary")
-            api_status_html = gr.HTML(value="")
-
-        # -------------------------------------------------------------------
-        # NGROK SECTION (hidden by default)
-        # -------------------------------------------------------------------
+        # --- NGROK SECTION --------------------------------------------------
         with gr.Group(visible=False) as ngrok_section:
             gr.Markdown("### Local Model via ngrok")
+            with gr.Row():
+                ngrok_url_field   = gr.Textbox(
+                    value="",
+                    label="ngrok Tunnel URL",
+                    placeholder="https://xxxx.ngrok-free.app/v1",
+                    scale=3,
+                )
+                ngrok_model_field = gr.Textbox(
+                    value="",
+                    label="Model Name",
+                    placeholder="e.g. llama3, mistral, phi3",
+                    scale=2,
+                )
+            with gr.Row():
+                test_ngrok_btn   = gr.Button("Test Connection", variant="secondary", scale=1)
+                ngrok_status_html = gr.HTML(value="", scale=3)
 
-            ngrok_url_field = gr.Textbox(
-                value="",
-                label="ngrok Tunnel URL",
-                placeholder=NGROK_URL_PLACEHOLDER,
-            )
-
-            test_ngrok_btn  = gr.Button("Test Connection", variant="secondary")
-            ngrok_status_html = gr.HTML(value="")
-
-            # Collapsible setup instructions
-            with gr.Accordion("📖 Setup Instructions", open=False):
+            # ngrok setup instructions accordion
+            with gr.Accordion("📖 Setup Instructions — Local Model via ngrok", open=False):
                 gr.Markdown(
                     """
-                    TODO: Add step-by-step instructions for:
-                    1. Installing and authenticating ngrok.
-                    2. Running a local OpenAI-compatible server (e.g. LM Studio, Ollama).
-                    3. Exposing the local server via `ngrok http 11434`.
-                    4. Pasting the resulting tunnel URL here.
+                    **Step 1 — Install and run a local model server**
+
+                    Option A — **Ollama** (easiest):
+                    ```bash
+                    # macOS / Linux
+                    curl -fsSL https://ollama.com/install.sh | sh
+                    ollama pull llama3
+                    ollama serve          # starts on http://localhost:11434
+                    ```
+
+                    Option B — **LM Studio**: Download from [lmstudio.ai](https://lmstudio.ai),
+                    load a model, and enable the local server (port 1234 by default).
+
+                    ---
+
+                    **Step 2 — Download and run the ToolForge proxy server**
+
+                    Download `local_agent_server.py` (button below), then:
+                    ```bash
+                    pip install fastapi uvicorn httpx
+                    # For Ollama:
+                    python local_agent_server.py --model llama3 --port 8080 --backend-url http://localhost:11434
+                    # For LM Studio:
+                    python local_agent_server.py --model your-model --port 8080 --backend-url http://localhost:1234
+                    ```
+
+                    ---
+
+                    **Step 3 — Expose via ngrok**
+                    ```bash
+                    # Install ngrok: https://ngrok.com/download
+                    ngrok config add-authtoken YOUR_TOKEN   # one-time setup
+                    ngrok http 8080
+                    ```
+                    Copy the **Forwarding** URL (e.g. `https://abcd1234.ngrok-free.app`)
+                    and paste it into the **ngrok Tunnel URL** field above (include `/v1` suffix).
+
+                    ---
+
+                    **Step 4** — Click **Test Connection** to verify, then **Run Agent**.
                     """
                 )
+                download_local_server_btn = gr.Button(
+                    "⬇ Download local_agent_server.py", variant="secondary"
+                )
+                local_server_file = gr.File(label="", visible=False)
 
         gr.HTML("<hr style='border-color:#374151;margin:8px 0;'>")
 
         # -------------------------------------------------------------------
-        # COMMON SETTINGS (shown for both connection modes)
+        # ENV URL + SYSTEM PROMPT
         # -------------------------------------------------------------------
-        gr.Markdown("### Run Settings")
-
-        with gr.Row():
-            difficulty_selector = gr.Dropdown(
-                choices=DIFFICULTY_OPTIONS,
-                value="Easy",
-                label="Difficulty",
-                scale=1,
-            )
-
-        # Editable system prompt — pre-filled from inference.py
+        gr.Markdown("### Settings")
+        env_url_field = gr.Textbox(
+            value=DEFAULT_ENV_URL,
+            label="ToolForge Env URL",
+            placeholder="http://localhost:8000",
+        )
         system_prompt_box = gr.Textbox(
             value=SYSTEM_PROMPT,
-            label="Agent System Prompt",
-            lines=14,
-            info=(
-                "You may edit the strategy section above the ⚠️ warning line. "
-                "Do NOT remove the JSON-only response requirement — it will break the parser."
-            ),
+            label="Agent System Prompt  (editable — do not remove the ⚠️ line or below)",
+            lines=10,
         )
-
-        run_btn = gr.Button("▶ Run Agent", variant="primary")
 
         gr.HTML("<hr style='border-color:#374151;margin:8px 0;'>")
 
         # -------------------------------------------------------------------
-        # RESULTS AREA (hidden until a run completes)
+        # RUN CONTROLS ROW
         # -------------------------------------------------------------------
-        with gr.Group(visible=False) as results_group:
-            gr.Markdown("### Results")
+        with gr.Row():
+            run_btn        = gr.Button("▶ Run Agent",     variant="primary",   scale=2)
+            next_ep_btn    = gr.Button("▶ Next Episode",  variant="secondary", scale=2, interactive=False)
+            pause_btn      = gr.Button("⏸ Pause",         variant="secondary", scale=1)
+            autoplay_btn   = gr.Button("🔄 Autoplay: OFF", variant="secondary", scale=1)
 
-            with gr.Row():
-                with gr.Column(scale=1):
-                    gr.Markdown("**🤖 Agent Plan**")
-                    byoa_plan_html = gr.HTML(
-                        value="<p style='color:#9ca3af;'>No plan yet.</p>"
-                    )
+        run_status_html = gr.HTML(value="")
 
-                    gr.Markdown("**⚙ Macro Library**")
-                    byoa_macro_html = gr.HTML(value=render_macro_library_html([]))
+        gr.HTML("<hr style='border-color:#374151;margin:8px 0;'>")
 
-                with gr.Column(scale=1):
-                    gr.Markdown("**🏆 Step Reward**")
-                    byoa_reward_html = gr.HTML(value=render_reward_html(0.0))
+        # -------------------------------------------------------------------
+        # RESULTS AREA
+        # -------------------------------------------------------------------
+        gr.Markdown("### Episode Results")
+        episode_table_html = gr.HTML(value=_render_episode_table([]))
 
-                    with gr.Row():
-                        byoa_turns_used = gr.Number(
-                            label="LLM Turns Used",
-                            value=0,
-                            interactive=False,
-                            precision=0,
-                        )
-                        byoa_turns_saved = gr.Number(
-                            label="Turns Saved vs Baseline",
-                            value=0,
-                            interactive=False,
-                            precision=0,
-                        )
+        gr.HTML("<hr style='border-color:#374151;margin:8px 0;'>")
 
-            # Run log storage (hidden) and download button
-            byoa_run_log_state = gr.State(value="")
+        gr.Markdown("### Macro Library")
+        byoa_macro_html = gr.HTML(value=render_macro_library_html([]))
 
-            with gr.Row():
-                download_btn    = gr.Button("⬇ Download Results JSON", scale=1)
-                download_status = gr.HTML(value="", scale=2)
+        gr.HTML("<hr style='border-color:#374151;margin:8px 0;'>")
+
+        # -------------------------------------------------------------------
+        # TRAINING DATA
+        # -------------------------------------------------------------------
+        gr.Markdown("### Training Data Export")
+        gr.Markdown(
+            "Live JSON log of every step — ready for fine-tuning or analysis. "
+            "Shows the last 10 records. Download to get all records."
+        )
+        training_json_html = gr.HTML(value=_json_block([]))
+        with gr.Row():
+            download_training_btn  = gr.Button("⬇ Download Training Data JSON", variant="secondary", scale=1)
+            training_download_file = gr.File(label="", visible=False, scale=2)
+
+        # -------------------------------------------------------------------
+        # HIDDEN STATE
+        # -------------------------------------------------------------------
+        episode_rows_state   = gr.State(value=[])   # List[Dict] — episode summary rows
+        training_data_state  = gr.State(value=[])   # List[Dict] — training records
+        episode_number_state = gr.State(value=1)    # int — current episode number (1-based)
+        autoplay_state       = gr.State(value=False) # bool — autoplay active
 
         # -------------------------------------------------------------------
         # EVENT WIRING
@@ -491,56 +828,140 @@ def build_byoa_tab() -> gr.Tab:
             outputs=[api_key_section, ngrok_section],
         )
 
-        # Provider changes → pre-fill base URL
-        provider_dropdown.change(
-            fn=on_provider_change,
-            inputs=[provider_dropdown],
-            outputs=[base_url_field],
-        )
-
-        # API key test button
+        # API key test
         test_api_btn.click(
             fn=on_test_connection_api,
-            inputs=[provider_dropdown, base_url_field, model_name_field, api_key_field],
+            inputs=[base_url_field, api_model_field, api_key_field],
             outputs=[api_status_html],
         )
 
-        # ngrok test button
+        # ngrok test
         test_ngrok_btn.click(
             fn=on_test_connection_ngrok,
-            inputs=[ngrok_url_field],
+            inputs=[ngrok_url_field, ngrok_model_field],
             outputs=[ngrok_status_html],
         )
 
-        # Run agent button
+        # Unified model name: API mode uses api_model_field, ngrok uses ngrok_model_field.
+        # The run handler reads both and picks the relevant one based on mode.
+
+        def _get_model_name(mode: str, api_model: str, ngrok_model: str) -> str:
+            """Return the active model name based on connection mode."""
+            if mode == "Local Model via ngrok":
+                return ngrok_model
+            return api_model
+
+        # Run agent (generator → streams updates)
+        def run_agent_wrapper(
+            mode, base_url, api_model, api_key, ngrok_url, ngrok_model,
+            env_url, episode_rows, training_data, ep_num,
+        ):
+            model = _get_model_name(mode, api_model, ngrok_model)
+            yield from run_agent_episode(
+                mode=mode,
+                base_url=base_url,
+                model_name=model,
+                api_key=api_key,
+                ngrok_url=ngrok_url,
+                env_url=env_url,
+                episode_rows_state=episode_rows,
+                training_data_state=training_data,
+                episode_number_state=ep_num,
+            )
+
+        _run_outputs = [
+            run_status_html,
+            episode_table_html,
+            training_json_html,
+            byoa_macro_html,
+            episode_rows_state,
+            training_data_state,
+            episode_number_state,
+        ]
+
         run_btn.click(
-            fn=on_run_byoa,
+            fn=run_agent_wrapper,
             inputs=[
                 connection_mode,
-                provider_dropdown,
                 base_url_field,
-                model_name_field,
+                api_model_field,
                 api_key_field,
                 ngrok_url_field,
-                difficulty_selector,
-                system_prompt_box,
+                ngrok_model_field,
+                env_url_field,
+                episode_rows_state,
+                training_data_state,
+                episode_number_state,
             ],
-            outputs=[
-                results_group,      # make visible
-                byoa_plan_html,
-                byoa_reward_html,
-                byoa_turns_used,
-                byoa_turns_saved,
-                byoa_macro_html,
-                byoa_run_log_state,
-            ],
+            outputs=_run_outputs,
         )
 
-        # Download button
-        download_btn.click(
-            fn=on_download_results,
-            inputs=[byoa_run_log_state],
-            outputs=[download_status],
+        # Next Episode — same as run but episode_number carries over from state
+        next_ep_btn.click(
+            fn=run_agent_wrapper,
+            inputs=[
+                connection_mode,
+                base_url_field,
+                api_model_field,
+                api_key_field,
+                ngrok_url_field,
+                ngrok_model_field,
+                env_url_field,
+                episode_rows_state,
+                training_data_state,
+                episode_number_state,
+            ],
+            outputs=_run_outputs,
+        )
+
+        # Enable Next Episode button after first run completes
+        run_btn.click(
+            fn=lambda: gr.update(interactive=True),
+            inputs=[],
+            outputs=[next_ep_btn],
+        )
+
+        # Autoplay toggle (visual only — actual loop left to user clicking)
+        def toggle_autoplay(active: bool):
+            new_active = not active
+            label = "🔄 Autoplay: ON" if new_active else "🔄 Autoplay: OFF"
+            return gr.update(value=label), new_active
+
+        autoplay_btn.click(
+            fn=toggle_autoplay,
+            inputs=[autoplay_state],
+            outputs=[autoplay_btn, autoplay_state],
+        )
+
+        # Download training data
+        def _do_download(data):
+            path = on_download_training_data(data)
+            if path:
+                return gr.update(value=path, visible=True)
+            return gr.update(visible=False)
+
+        download_training_btn.click(
+            fn=_do_download,
+            inputs=[training_data_state],
+            outputs=[training_download_file],
+        )
+
+        # Download local_agent_server.py
+        def _serve_local_agent_server():
+            """Return the path to local_agent_server.py for download."""
+            candidate = os.path.join(
+                os.path.dirname(__file__), "..", "ui", "local_agent_server.py"
+            )
+            alt = os.path.join(os.path.dirname(__file__), "local_agent_server.py")
+            path = candidate if os.path.exists(candidate) else (alt if os.path.exists(alt) else None)
+            if path:
+                return gr.update(value=path, visible=True)
+            return gr.update(visible=False)
+
+        download_local_server_btn.click(
+            fn=_serve_local_agent_server,
+            inputs=[],
+            outputs=[local_server_file],
         )
 
     return tab

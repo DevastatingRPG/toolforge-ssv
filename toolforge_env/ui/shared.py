@@ -528,18 +528,17 @@ def render_reward_html(reward: float) -> str:
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     """
     if reward >= 0.75:
-        colour, label = "#22c55e", "Excellent"
+        colour = "#22c55e"
     elif reward >= 0.50:
-        colour, label = "#f59e0b", "Good"
+        colour = "#f59e0b"
     elif reward >= 0.0:
-        colour, label = "#f97316", "Partial"
+        colour = "#f97316"
     else:
-        colour, label = "#ef4444", "Penalty"
+        colour = "#ef4444"
 
     return (
         f'<div style="text-align:center;padding:12px;">'
         f'<div style="font-size:2.8em;font-weight:800;color:{colour};">{reward:+.2f}</div>'
-        f'<div style="font-size:0.85em;color:{colour};opacity:0.8;margin-top:2px;">{label}</div>'
         f'</div>'
     )
 

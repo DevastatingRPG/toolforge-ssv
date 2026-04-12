@@ -133,13 +133,35 @@ class ToolforgeEnvironment(Environment):
         task_list = self._task_selector.next_task_list(resolved_task_id)
 
         self._input_provider = self._input_provider_factory(task_list)
-        first_task = get_next_task_from_generator(self._input_provider)
-        self._state.current_task = first_task
+
+        # ------------------------------------------------------------------
+        # Capture episode length BEFORE consuming the first task.
+        # This value is forwarded to the UI via observation metadata so the
+        # Gradio demo tab can track progress independently of env.done.
+        # (The stateless HTTP /reset + /step endpoints each create a fresh
+        # env instance, so env.done is unreliable for navigation; we use
+        # total_tasks as the authoritative episode-length signal instead.)
+        # ------------------------------------------------------------------
+        total_tasks: int = (
+            self._input_provider.task_count()
+            if self._input_provider is not None
+            else 0
+        )
+
+        # Only fetch the first task when a real input provider exists.
+        # If input_provider is None (e.g. future human-interaction mode where
+        # tasks are supplied externally), we leave current_task as the
+        # default placeholder and let the caller push tasks in via step().
+        if self._input_provider is not None:
+            first_task = get_next_task_from_generator(self._input_provider)
+            self._state.current_task = first_task
+
         if hasattr(self.rubric, "reset"):
             self.rubric.reset()
-        # Reset episode-level macro tracking state
 
         obs = create_default_observation(self._state, available_tools_to_prompt_specs)
+        # Surface episode length so the UI can navigate without relying on env.done
+        obs.metadata = {"total_tasks": total_tasks}
         return obs
 
     def step(self, action: ToolForgeAction) -> ToolForgeObservation:  # type: ignore[override]

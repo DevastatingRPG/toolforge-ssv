@@ -20,5 +20,18 @@ class SimulatedDataLoader(InputProvider):
     def is_done(self) -> bool:
         return self.idx >= len(self.tasks)
 
+    def task_count(self) -> int:
+        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        # task_count
+        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        # Return the total number of tasks in this episode.
+        #
+        # The environment passes this value to the UI via observation
+        # metadata so the UI knows the episode length without relying on
+        # env.done, which would break when the HTTP server creates a fresh
+        # env instance per request (stateless REST mode).
+        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        return len(self.tasks)
+
     def reset(self):
         self.idx = 0

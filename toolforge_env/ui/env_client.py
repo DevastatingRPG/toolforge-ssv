@@ -26,8 +26,8 @@ TODO: Add retry logic with exponential back-off for HF Space cold starts.
 TODO: Add request caching / debounce for rapid button presses.
 """
 
-import json
 import logging
+import os
 from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
@@ -38,9 +38,30 @@ import httpx
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Default env server address (localhost when running locally)
+# Environment-aware URL resolution
 # ---------------------------------------------------------------------------
-DEFAULT_ENV_URL: str = "http://localhost:8000"
+
+def resolve_env_url() -> str:
+    """Resolve the environment server URL from context.
+
+    Priority order:
+        1. ``TOOLFORGE_ENV_URL`` env var (explicit override).
+        2. ``SPACE_HOST`` env var (set automatically by Hugging Face Spaces)
+           → ``https://{SPACE_HOST}``.
+        3. Fallback to ``http://localhost:8000`` for local dev.
+    """
+    explicit = os.getenv("TOOLFORGE_ENV_URL", "").strip()
+    if explicit:
+        return explicit.rstrip("/")
+
+    space_host = os.getenv("SPACE_HOST", "").strip()
+    if space_host:
+        return f"https://{space_host}"
+
+    return "http://localhost:8000"
+
+
+DEFAULT_ENV_URL: str = resolve_env_url()
 
 # Request timeout in seconds for each REST call
 REQUEST_TIMEOUT: float = 15.0
@@ -55,7 +76,10 @@ def check_env_health(base_url: str) -> Tuple[bool, str]:
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     check_env_health
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    Ping the environment server to verify it is reachable.
+    Two-level readiness probe for the environment server.
+
+    Level 1 — ``GET /health``    → server alive.
+    Level 2 — ``POST /reset``    → ToolForge API shape confirmed.
 
     Args:
         base_url : Root URL of the env server (e.g. "http://localhost:8000").
@@ -64,22 +88,54 @@ def check_env_health(base_url: str) -> Tuple[bool, str]:
         Tuple (is_healthy: bool, status_message: str).
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     """
-    # Strip trailing slash for clean URL building
     base_url = base_url.rstrip("/")
-    url = f"{base_url}/health"
 
+    # --- Level 1: server alive -------------------------------------------
+    health_url = f"{base_url}/health"
     try:
-        resp = httpx.get(url, timeout=REQUEST_TIMEOUT)
-        if resp.status_code == 200:
-            logger.info("Env health OK | url=%s", base_url)
-            return True, f"✅ Environment server is running at {base_url}"
-        logger.warning("Env health check returned %d | url=%s", resp.status_code, base_url)
-        return False, f"❌ Server at {base_url} returned HTTP {resp.status_code}"
+        resp = httpx.get(health_url, timeout=REQUEST_TIMEOUT)
+        if resp.status_code != 200:
+            logger.warning("Health check HTTP %d | url=%s", resp.status_code, base_url)
+            return False, f"❌ Server at {base_url} returned HTTP {resp.status_code}"
     except httpx.ConnectError:
         return False, f"❌ Cannot connect to environment at {base_url} — is the server running?"
     except Exception as exc:
-        logger.error("Env health check failed | url=%s error=%s", base_url, exc)
+        logger.error("Health check failed | url=%s error=%s", base_url, exc)
         return False, f"❌ Unexpected error: {exc}"
+
+    logger.info("Level-1 health OK | url=%s", base_url)
+
+    # --- Level 2: API shape (lightweight reset) --------------------------
+    reset_url = f"{base_url}/reset"
+    try:
+        resp = httpx.post(reset_url, json={"task_id": "easy"}, timeout=REQUEST_TIMEOUT)
+        if resp.status_code != 200:
+            logger.warning("API shape check HTTP %d | url=%s", resp.status_code, base_url)
+            return (
+                False,
+                f"⚠️ Server alive but POST /reset returned HTTP {resp.status_code}. "
+                f"ToolForge API may not be configured correctly.",
+            )
+        data = resp.json()
+        obs = data.get("observation", {})
+        if "current_task" not in obs or "available_tools" not in obs:
+            return (
+                False,
+                f"⚠️ Server alive but /reset response is missing expected fields. "
+                f"Check that the ToolForge environment is loaded.",
+            )
+    except Exception as exc:
+        logger.warning("API shape probe failed | url=%s error=%s", base_url, exc)
+        return (
+            False,
+            f"⚠️ Server alive (health OK) but API probe failed: {exc}",
+        )
+
+    logger.info("Level-2 API shape OK | url=%s", base_url)
+    return (
+        True,
+        f"✅ Environment server ready at {base_url} — health OK, API verified.",
+    )
 
 
 # ===========================================================================
@@ -91,15 +147,20 @@ def env_reset(base_url: str, task_id: str) -> Tuple[Optional[Dict[str, Any]], st
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     env_reset
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    Call POST /reset on the environment server.
+    Call POST /web/reset on the environment server.
 
-    The server resets its internal state, loads the task group identified
-    by task_id, and returns the first observation.
+    Uses the /web/reset endpoint (provided by create_web_interface_app)
+    rather than the bare /reset endpoint.  The key difference is that
+    /web/reset is backed by WebInterfaceManager which holds a PERSISTENT
+    env instance — state is preserved between reset and subsequent step
+    calls.  The bare /reset endpoint creates a fresh env per request
+    (stateless), so /step would run on an un-initialized env, returning
+    "Default task" and done=True immediately.
 
     Args:
-        base_url : Root URL of the env server.
-        task_id  : Task group identifier — e.g. "easy-deployment-sprints",
-                   "medium-traffic-readiness", or the alias "easy" / "medium" / "hard".
+        base_url : Root URL of the env server (e.g. "http://localhost:8000").
+        task_id  : Task group identifier — e.g. "easy-deployment-sprints"
+                   or the alias "easy" / "medium" / "hard".
 
     Returns:
         Tuple (result_dict, error_msg).
@@ -107,6 +168,7 @@ def env_reset(base_url: str, task_id: str) -> Tuple[Optional[Dict[str, Any]], st
             observation.current_task.prompt     str
             observation.current_task.id         str
             observation.available_tools         list[dict]
+            observation.metadata.total_tasks    int   ← episode length
             observation.grading                 dict | None
             reward                              float | None
             done                                bool
@@ -114,7 +176,7 @@ def env_reset(base_url: str, task_id: str) -> Tuple[Optional[Dict[str, Any]], st
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     """
     base_url = base_url.rstrip("/")
-    url      = f"{base_url}/reset"
+    url      = f"{base_url}/web/reset"   # WebInterfaceManager — stateful env
 
     # Payload matches the env reset() signature: task_id kwarg
     payload: Dict[str, Any] = {"task_id": task_id}
@@ -144,7 +206,7 @@ def env_step(
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     env_step
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    Call POST /step on the environment server.
+    Call POST /web/step on the environment server.
 
     Constructs a ToolForgeAction payload from the given plan and optional
     macro proposal, submits it, and returns the parsed result.
@@ -168,7 +230,7 @@ def env_step(
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     """
     base_url = base_url.rstrip("/")
-    url      = f"{base_url}/step"
+    url      = f"{base_url}/web/step"   # WebInterfaceManager — stateful env
 
     # Build the plan as a list of ToolCall dicts
     plan_payload: List[Dict[str, str]] = [{"tool_name": t} for t in plan]
@@ -186,10 +248,14 @@ def env_step(
             "steps":       [{"tool_name": s} for s in macro_proposal["steps"]],
         }
 
+    # OpenEnv's HTTP /step endpoint expects the action nested under
+    # a top-level "action" field, not the raw action object at the root.
     payload: Dict[str, Any] = {
-        "action_type":    action_type,
-        "plan":           plan_payload,
-        "macro_proposal": macro_payload,
+        "action": {
+            "action_type":    action_type,
+            "plan":           plan_payload,
+            "macro_proposal": macro_payload,
+        }
     }
 
     try:
@@ -254,6 +320,33 @@ def parse_tools_from_obs(result: Dict[str, Any]) -> List[Dict[str, Any]]:
         return result.get("observation", {}).get("available_tools", [])
     except Exception:
         return []
+
+
+def parse_total_tasks_from_obs(result: Dict[str, Any]) -> int:
+    """
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    parse_total_tasks_from_obs
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    Extract the total number of tasks in the current episode from the
+    observation metadata returned by env_reset().
+
+    The environment sets ``observation.metadata.total_tasks`` in
+    reset() so the UI can track episode progress without relying on
+    env.done (which is unreliable in stateless REST mode).
+
+    Args:
+        result : Raw response dict from env_reset().
+
+    Returns:
+        Total task count as a positive int, or 0 on parse failure.
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    """
+    try:
+        meta = result.get("observation", {}).get("metadata", {}) or {}
+        count = meta.get("total_tasks", 0)
+        return int(count) if count else 0
+    except Exception:
+        return 0
 
 
 def extract_macros(available_tools: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
