@@ -12,7 +12,7 @@ For every run, the agent must carefully adhere to these rules and conventions:
    - Never touch untaught details without explicitly asking the user first.
 
 2. **Workspace & Reference Protocol:**
-   - The main workspace and project directory is `openenv-SSV`.
+   - The main workspace and project directory is `toolforge-ssv`.
    - The `OpenEnv` folder (e.g., `openenv-course/OpenEnv`) serves as the tutorial and helper method reference. Consult it for API standards, examples, and OpenEnv-specific implementations.
 
 3. **Self-Updating Instructions:**
