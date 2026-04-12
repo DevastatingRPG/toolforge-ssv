@@ -90,10 +90,6 @@ SYSTEM_PROMPT: str = textwrap.dedent(
 
     Naming:
     - Use short snake_case names that describe the operation pattern.
-
-    ⚠️  IMPORTANT — DO NOT EDIT BELOW THIS LINE  ⚠️
-    Respond ONLY with valid JSON matching the ToolForgeAction schema.
-    No markdown, no explanation, no commentary outside the JSON object.
     """
 ).strip()
 

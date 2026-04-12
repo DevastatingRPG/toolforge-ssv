@@ -16,7 +16,7 @@ Connection modes:
     2. Local Model via ngrok       — ngrok_url + model_name
 
 Results:
-    - Episode-by-episode table (Episode | Task Summary | Plan | Reward | Turns | Macro?)
+    - Episode-by-episode table (Episode | Task Summary | Plan | Reward | Turns | Macro used)
     - Live training data JSON block + real tempfile download
     - Macro library display
 
@@ -219,6 +219,7 @@ def _get_model_action(
     available_tools: List[Dict[str, Any]],
     last_reward: float,
     history: List[str],
+    system_prompt: str,
 ) -> Any:
     """
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -233,14 +234,38 @@ def _get_model_action(
 
     user_prompt = _build_user_prompt(step, task_prompt, available_tools, last_reward, history)
     system = (
-        SYSTEM_PROMPT
-        + "\nRespond ONLY with valid JSON matching the ToolForgeAction schema. "
-        + "No markdown, no explanation."
+        system_prompt
+        + "Respond ONLY with valid JSON matching the ToolForgeAction schema.\n"
+        + "No markdown, no explanation, no commentary outside the JSON object."
     )
-    schema_suffix = (
-        f"\n\nSchema:\n{json.dumps(ToolForgeAction.model_json_schema(), indent=2)}"
-        f"\n\nToolCallSchema:\n{json.dumps(ToolCall.model_json_schema(), indent=2)}"
-    )
+    schema_suffix = """
+
+Expected JSON Structure:
+{
+  "action_type": "propose_plan", // or "propose_plan_with_macro"
+  "plan": [
+    { "tool_name": "deploy" },
+    { "tool_name": "healthcheck" }
+  ],
+  "macro_proposal": null // or an object if action_type is propose_plan_with_macro
+}
+
+Example of proposing a macro:
+{
+  "action_type": "propose_plan_with_macro",
+  "plan": [
+    { "tool_name": "deploy" }
+  ],
+  "macro_proposal": {
+    "name": "deploy_and_verify",
+    "description": "Deploys code and checks health",
+    "steps": [
+      { "tool_name": "deploy" },
+      { "tool_name": "healthcheck" }
+    ]
+  }
+}
+"""
     try:
         completion = client.chat.completions.create(
             model=model_name,
@@ -302,7 +327,7 @@ def _render_episode_table(rows: List[Dict[str, Any]]) -> str:
         "<th style='padding:6px 10px;'>Plan</th>"
         "<th style='padding:6px 10px;'>Reward</th>"
         "<th style='padding:6px 10px;'>Turns</th>"
-        "<th style='padding:6px 10px;'>Macro?</th>"
+        "<th style='padding:6px 10px;'>Macro used</th>"
         "</tr></thead><tbody>"
     )
 
@@ -351,6 +376,7 @@ def run_agent_episode(
     api_key: str,
     ngrok_url: str,
     env_url: str,
+    system_prompt: str,
     # State inputs
     episode_rows_state: List[Dict[str, Any]],
     training_data_state: List[Dict[str, Any]],
@@ -373,6 +399,7 @@ def run_agent_episode(
         api_key              : API key (API key mode) — NEVER logged
         ngrok_url            : ngrok tunnel URL (ngrok mode)
         env_url              : ToolForge env server URL
+        system_prompt        : The editable system prompt provided by the user
         episode_rows_state   : Accumulated episode row dicts (across episodes)
         training_data_state  : Accumulated training data records
         episode_number_state : Current episode number (1-based)
@@ -386,6 +413,7 @@ def run_agent_episode(
             _json_block(training_data_state),
             render_macro_library_html([]),
             episode_rows_state, training_data_state, episode_number_state,
+            gr.update(interactive=True)
         )
         return
 
@@ -397,6 +425,7 @@ def run_agent_episode(
             _json_block(training_data_state),
             render_macro_library_html([]),
             episode_rows_state, training_data_state, episode_number_state,
+            gr.update(interactive=True)
         )
         return
 
@@ -410,6 +439,7 @@ def run_agent_episode(
             _json_block(training_data_state),
             render_macro_library_html([]),
             episode_rows_state, training_data_state, episode_number_state,
+            gr.update(interactive=True)
         )
         return
 
@@ -420,6 +450,7 @@ def run_agent_episode(
         _json_block(training_data_state),
         render_macro_library_html([]),
         episode_rows_state, training_data_state, episode_number_state,
+        gr.update(interactive=False)
     )
 
     # --- Reset environment --------------------------------------------------
@@ -431,6 +462,7 @@ def run_agent_episode(
             _json_block(training_data_state),
             render_macro_library_html([]),
             episode_rows_state, training_data_state, episode_number_state,
+            gr.update(interactive=True)
         )
         return
 
@@ -467,12 +499,13 @@ def run_agent_episode(
             _json_block(training_data_state),
             render_macro_library_html(macros),
             episode_rows_state, training_data_state, episode_number_state,
+            gr.update(interactive=False)
         )
 
         # LLM call
         action, raw_text, llm_err = _get_model_action(
             client, model_name, step,
-            task_prompt, tools_for_llm, last_reward, history,
+            task_prompt, tools_for_llm, last_reward, history, system_prompt
         )
 
         if llm_err and raw_text is None:
@@ -483,6 +516,7 @@ def run_agent_episode(
                 _json_block(training_data_state),
                 render_macro_library_html(macros),
                 episode_rows_state, training_data_state, episode_number_state,
+                gr.update(interactive=True)
             )
             return
 
@@ -508,6 +542,7 @@ def run_agent_episode(
                 _json_block(training_data_state),
                 render_macro_library_html(macros),
                 episode_rows_state, training_data_state, episode_number_state,
+                gr.update(interactive=True)
             )
             return
 
@@ -569,6 +604,7 @@ def run_agent_episode(
         _json_block(training_data_state),
         render_macro_library_html(macros),
         new_rows, training_data_state, new_ep_num,
+        gr.update(interactive=True)
     )
 
 
@@ -764,7 +800,7 @@ def build_byoa_tab() -> gr.Tab:
         )
         system_prompt_box = gr.Textbox(
             value=SYSTEM_PROMPT,
-            label="Agent System Prompt  (editable — do not remove the ⚠️ line or below)",
+            label="Agent System Prompt  (editable)",
             lines=10,
         )
 
@@ -854,7 +890,7 @@ def build_byoa_tab() -> gr.Tab:
         # Run agent (generator → streams updates)
         def run_agent_wrapper(
             mode, base_url, api_model, api_key, ngrok_url, ngrok_model,
-            env_url, episode_rows, training_data, ep_num,
+            env_url, system_prompt, episode_rows, training_data, ep_num,
         ):
             model = _get_model_name(mode, api_model, ngrok_model)
             yield from run_agent_episode(
@@ -864,6 +900,7 @@ def build_byoa_tab() -> gr.Tab:
                 api_key=api_key,
                 ngrok_url=ngrok_url,
                 env_url=env_url,
+                system_prompt=system_prompt,
                 episode_rows_state=episode_rows,
                 training_data_state=training_data,
                 episode_number_state=ep_num,
@@ -877,6 +914,7 @@ def build_byoa_tab() -> gr.Tab:
             episode_rows_state,
             training_data_state,
             episode_number_state,
+            system_prompt_box,
         ]
 
         run_btn.click(
@@ -889,6 +927,7 @@ def build_byoa_tab() -> gr.Tab:
                 ngrok_url_field,
                 ngrok_model_field,
                 env_url_field,
+                system_prompt_box,
                 episode_rows_state,
                 training_data_state,
                 episode_number_state,
@@ -907,6 +946,7 @@ def build_byoa_tab() -> gr.Tab:
                 ngrok_url_field,
                 ngrok_model_field,
                 env_url_field,
+                system_prompt_box,
                 episode_rows_state,
                 training_data_state,
                 episode_number_state,
