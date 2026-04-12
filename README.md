@@ -58,7 +58,7 @@ async def main():
 
 
 ## 💡 Why This Problem?
-Modern tool-enabled agents (e.g., using function calling or tool APIs) suffer from a key inefficiency:
+Modern tool-enabled AI agents (e.g., using function calling or tool APIs) suffer from a key inefficiency:
 
 - They recompute execution plans from scratch for every request
 - They repeatedly select tools, chain calls, and infer dependencies
@@ -136,7 +136,7 @@ flowchart TD
 
 ## 📊 Episode Grading
 
-At the end of each episode, the agent receives a **final score ∈ [0.01, 0.99]** based on overall performance.
+At the end of each episode, performance is evaluated and assigned a final benchmark score between 0.01 and 0.99 across correctness, efficiency, and macro usage.
 
 ### 🧮 Scoring Breakdown
 
@@ -168,7 +168,7 @@ Final score prioritizes correctness first, then efficiency and abstraction.
 
 ## What Makes This Different
 
-ToolForge goes beyond simple tool execution benchmarks. It evaluates an agent's ability to abstract and optimize its own capabilities over time:
+ToolForge goes beyond simple tool execution benchmarks. It evaluates an agent's ability to abstract and optimize its own capabilities over time, the same challenge faced by any production agentic system operating at scale:
 
 - **Macro Creation:** Agents can submit a `propose_plan_with_macro` action to permanently add a new, cheaper master tool to their environment state.
 - **Dual-Objective Scoring:** Plans are evaluated on both **semantic accuracy** (did it solve the task?) and **token efficiency** (did it use macros to save tokens?).
