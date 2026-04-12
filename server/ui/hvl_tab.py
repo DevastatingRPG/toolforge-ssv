@@ -44,6 +44,38 @@ from typing import Any, Dict, List, Optional, Tuple
 import gradio as gr
 import httpx
 
+# ---------------------------------------------------------------------------
+# Inline-style HTML helpers — no CSS class dependency, always visible even
+# when this child app is mounted inside OpenEnv's root TabbedInterface.
+# ---------------------------------------------------------------------------
+_DIVIDER = (
+    "<div style='border:none;border-top:3px solid #7c3aed;"
+    "margin:22px 0 18px;opacity:0.65;'></div>"
+)
+
+def _sec_hdr(text: str) -> str:
+    """Bold section title with purple left-bar accent."""
+    return (
+        f"<div style='border-left:4px solid #7c3aed;padding:5px 14px;"
+        f"margin:4px 0 14px;font-size:1.05em;font-weight:700;color:#e2e8f0;'>"
+        f"{text}</div>"
+    )
+
+def _sub_hdr(text: str) -> str:
+    """Smaller purple sub-section heading."""
+    return (
+        f"<div style='font-size:0.90em;font-weight:600;color:#a78bfa;"
+        f"margin:10px 0 5px;'>{text}</div>"
+    )
+
+def _lbl(text: str) -> str:
+    """Tiny uppercase field label."""
+    return (
+        f"<div style='font-size:0.82em;font-weight:600;color:#64748b;"
+        f"margin:8px 0 3px;text-transform:uppercase;letter-spacing:0.04em;'>"
+        f"{text}</div>"
+    )
+
 from server.ui.shared import (
     ATOMIC_TOOLS,
     SYSTEM_PROMPT,
@@ -830,12 +862,12 @@ def build_hvl_tab() -> gr.Tab:
             The LLM plan is scored with a local heuristic (labelled in the results).
             """
         )
-        gr.HTML("<hr style='border-color:#374151;margin:8px 0;'>")
+        gr.HTML(_DIVIDER)
 
         # -------------------------------------------------------------------
         # CONNECTION SECTION
         # -------------------------------------------------------------------
-        gr.Markdown("### Connect Your LLM  *(optional — needed for real LLM opponent)*")
+        gr.HTML(_sec_hdr("Connect Your LLM <span style='color:#6b7280;font-weight:400;font-size:0.88em;'>(optional — for real LLM opponent)</span>"))
 
         hvl_connection_mode = gr.Radio(
             choices=["API Key (OpenAI-compatible)", "Local Model via ngrok"],
@@ -887,7 +919,7 @@ def build_hvl_tab() -> gr.Tab:
                 test_ngrok_btn    = gr.Button("Test Connection", variant="secondary", scale=1)
                 ngrok_status_html = gr.HTML(value="", scale=3)
 
-        gr.HTML("<hr style='border-color:#374151;margin:8px 0;'>")
+        gr.HTML(_DIVIDER)
 
         # -------------------------------------------------------------------
         # ENV URL + START
@@ -899,7 +931,7 @@ def build_hvl_tab() -> gr.Tab:
                 placeholder="http://localhost:8000",
                 scale=3,
             )
-            start_btn = gr.Button("🎮 Start Game", variant="primary", scale=2)
+            start_btn = gr.Button("Start Game", variant="primary", scale=2)
 
         start_status_html = gr.HTML(value="")
 
@@ -915,7 +947,7 @@ def build_hvl_tab() -> gr.Tab:
                 interactive=False,
             )
 
-            gr.HTML("<hr style='border-color:#374151;margin:8px 0;'>")
+            gr.HTML(_DIVIDER)
 
             # Current task
             task_display = gr.Textbox(
@@ -930,8 +962,8 @@ def build_hvl_tab() -> gr.Tab:
 
                 # ===== LEFT: Human's Plan =====
                 with gr.Column(scale=1):
-                    gr.Markdown("### 🧑 Your Plan")
-                    gr.Markdown("**Available Tools** *(enter names one per line)*")
+                    gr.HTML(_sec_hdr("Your Plan"))
+                    gr.HTML(_lbl("Available Tools — enter names one per line"))
                     tool_reference_html = gr.HTML(value=_render_tool_reference())
 
                     human_plan_input = gr.Textbox(
@@ -939,11 +971,11 @@ def build_hvl_tab() -> gr.Tab:
                         placeholder="deploy\nhealthcheck\nnotify",
                         lines=6,
                     )
-                    submit_plan_btn = gr.Button("Submit My Plan ▶", variant="primary")
+                    submit_plan_btn = gr.Button("Submit My Plan", variant="primary")
 
                 # ===== RIGHT: LLM's Plan =====
                 with gr.Column(scale=1):
-                    gr.Markdown("### 🤖 LLM Plan")
+                    gr.HTML(_sec_hdr("LLM Plan"))
                     llm_plan_placeholder = gr.Textbox(
                         label="LLM's plan (revealed after you submit)",
                         value="Waiting for your submission…",
@@ -956,32 +988,32 @@ def build_hvl_tab() -> gr.Tab:
             # ---------------------------------------------------------------
             with gr.Column(visible=False) as results_row:
 
-                gr.HTML("<hr style='border-color:#374151;margin:8px 0;'>")
-                gr.Markdown("### Results")
+                gr.HTML(_DIVIDER)
+                gr.HTML(_sec_hdr("Results"))
 
                 winner_banner_html = gr.HTML(value="")
 
                 with gr.Row():
                     with gr.Column(scale=1):
-                        gr.Markdown("**🧑 Your Score**  *(real env reward)*")
+                        gr.HTML(_sub_hdr("Your Score <span style='color:#6b7280;font-weight:400;'>(real env reward)</span>"))
                         human_score_html = gr.HTML(
                             value='<div style="text-align:center;font-size:2em;font-weight:800;">—</div>'
                         )
-                        gr.Markdown("**Your Plan:**")
+                        gr.HTML(_lbl("Your Plan"))
                         human_plan_result_html = gr.HTML(value="<p>—</p>")
 
                     with gr.Column(scale=1):
-                        gr.Markdown("**🤖 LLM Score**  *(local heuristic)*")
+                        gr.HTML(_sub_hdr("LLM Score <span style='color:#6b7280;font-weight:400;'>(local heuristic)</span>"))
                         llm_score_html = gr.HTML(
                             value='<div style="text-align:center;font-size:2em;font-weight:800;">—</div>'
                         )
-                        gr.Markdown("**LLM Plan:**")
+                        gr.HTML(_lbl("LLM Plan"))
                         llm_plan_result_html = gr.HTML(value="<p>—</p>")
 
-                gr.Markdown("**Slot Breakdown:**")
+                gr.HTML(_lbl("Slot Breakdown"))
                 slot_table_html = gr.HTML(value="")
 
-                next_task_btn = gr.Button("Next Task ▶", variant="secondary")
+                next_task_btn = gr.Button("Next Task →", variant="secondary")
 
         # -------------------------------------------------------------------
         # HIDDEN STATE
