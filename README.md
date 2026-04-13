@@ -13,10 +13,26 @@ tags:
   - tool-use
   - reinforcement-learning
 ---
-
 # 🚀 ToolForge Adaptive Tool Learning Environment
 
 A deterministic agent optimization environment designed to evaluate and enhance how AI agents learn reusable tool abstractions from repeated user workflows—reducing redundant reasoning, minimizing token usage, and improving execution efficiency over time.
+
+
+> [!NOTE]
+> **TL;DR**
+> ToolForge is a deterministic environment for optimizing tool-using LLM agents by:
+> - Learning reusable tool abstractions (macros)
+> - Reducing token usage across repeated workflows
+> - Improving execution efficiency over time  
+>
+> Focus: agent optimization, not just tool execution.
+
+## 📊 Key Signals
+
+- Agents learn reusable macros to avoid recomputing workflows
+- Macro-based plans achieve higher efficiency scores than naive plans
+- Environment enforces dual-objective evaluation: correctness + token efficiency
+- Supports progressive difficulty (easy → hard) to test generalization
 
 ## Quick Start
 
